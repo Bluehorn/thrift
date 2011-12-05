@@ -1490,10 +1490,10 @@ void t_py_generator::generate_service_client(t_service* tservice) {
   if (gen_defer_) {
     f_service_ <<
       endl <<
-      indent() << "def thrift_receive_reply(self):" << endl;
+      indent() << "def thrift_receive_reply(self, wait_always=False):" << endl;
     indent_up();
     f_service_ <<
-      indent() << "if not self._reqs:" << endl <<
+      indent() << "if not wait_always and not self._reqs:" << endl <<
       indent() << "  return False" << endl <<
       indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
       indent() << "d = self._reqs.pop(rseqid)" << endl <<
