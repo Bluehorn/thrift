@@ -1353,10 +1353,17 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       indent() << "def thrift_receive_reply(self):" << endl;
     indent_up();
     f_service_ <<
+      indent() << "if not self._reqs:" << endl <<
+      indent() << "  return False" << endl <<
       indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
-      indent() << "d = self._reqs[rseqid]" << endl <<
-      indent() << "d.callback(result=(fname, mtype, rseqid))" << endl;
+      indent() << "d = self._reqs.pop(rseqid)" << endl <<
+      indent() << "d.callback(result=(fname, mtype, rseqid))" << endl <<
+      indent() << "return True" << endl;
     indent_down();
+
+    f_service_ << endl <<
+      indent() << "def thrift_pending_requests(self):" << endl <<
+      indent() << "  return len(self._reqs)" << endl;
   }
 
   indent_down();
