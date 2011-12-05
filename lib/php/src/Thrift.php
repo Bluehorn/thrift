@@ -747,6 +747,8 @@ class TApplicationException extends TException {
   const WRONG_METHOD_NAME = 3;
   const BAD_SEQUENCE_ID = 4;
   const MISSING_RESULT = 5;
+  const INTERNAL_ERROR = 6;
+  const PROTOCOL_ERROR = 7;
 
   function __construct($message=null, $code=0) {
     parent::__construct($message, $code);
@@ -783,3 +785,5 @@ if (!isset($GLOBALS['THRIFT_ROOT'])) {
 }
 include_once $GLOBALS['THRIFT_ROOT'].'/protocol/TProtocol.php';
 include_once $GLOBALS['THRIFT_ROOT'].'/transport/TTransport.php';
+include_once $GLOBALS['THRIFT_ROOT'].'/TStringUtils.php';
+

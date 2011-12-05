@@ -18,8 +18,13 @@
  */
 package org.apache.thrift;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -29,6 +34,7 @@ import junit.framework.TestCase;
 
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TProtocol;
+import org.apache.thrift.protocol.TTupleProtocol;
 import org.apache.thrift.transport.TMemoryBuffer;
 
 import thrift.test.ComparableUnion;
@@ -45,6 +51,7 @@ public class TestTUnion extends TestCase {
     TestUnion union = new TestUnion();
 
     assertFalse(union.isSet());
+    assertFalse(union.isSetI32_field());
     assertNull(union.getFieldValue());
 
     union = new TestUnion(TestUnion._Fields.I32_FIELD, 25);
@@ -52,6 +59,8 @@ public class TestTUnion extends TestCase {
     assertEquals(Integer.valueOf(25), union.getFieldValue());
   
     assertEquals(Integer.valueOf(25), union.getFieldValue(TestUnion._Fields.I32_FIELD));
+    
+    assertTrue(union.isSetI32_field());
   
     try {
       union.getFieldValue(TestUnion._Fields.STRING_FIELD);
@@ -69,6 +78,8 @@ public class TestTUnion extends TestCase {
     assertEquals(1, union.getI32_field());
     union.hashCode();
 
+    assertFalse(union.isSetString_field());
+    
     try {
       union.getString_field();
       fail("should have thrown an exception");
@@ -143,6 +154,7 @@ public class TestTUnion extends TestCase {
 
   public void testSerialization() throws Exception {
     TestUnion union = new TestUnion(TestUnion._Fields.I32_FIELD, 25);
+    union.setI32_set(Collections.singleton(42));
 
     TMemoryBuffer buf = new TMemoryBuffer(0);
     TProtocol proto = new TBinaryProtocol(buf);
@@ -174,6 +186,41 @@ public class TestTUnion extends TestCase {
     swau.write(proto);
     new Empty().read(proto);
   }
+  
+  public void testTupleProtocolSerialization () throws Exception {
+    TestUnion union = new TestUnion(TestUnion._Fields.I32_FIELD, 25);
+    union.setI32_set(Collections.singleton(42));
+
+    TMemoryBuffer buf = new TMemoryBuffer(0);
+    TProtocol proto = new TTupleProtocol(buf);
+
+    union.write(proto);
+
+    TestUnion u2 = new TestUnion();
+
+    u2.read(proto);
+
+    assertEquals(u2, union);
+
+    StructWithAUnion swau = new StructWithAUnion(u2);
+
+    buf = new TMemoryBuffer(0);
+    proto = new TBinaryProtocol(buf);
+
+    swau.write(proto);
+
+    StructWithAUnion swau2 = new StructWithAUnion();
+    assertFalse(swau2.equals(swau));
+    swau2.read(proto);
+    assertEquals(swau2, swau);
+
+    // this should NOT throw an exception.
+    buf = new TMemoryBuffer(0);
+    proto = new TTupleProtocol(buf);
+
+    swau.write(proto);
+    new Empty().read(proto);
+  }
 
   public void testSkip() throws Exception {
     TestUnion tu = TestUnion.string_field("string");
@@ -199,5 +246,23 @@ public class TestTUnion extends TestCase {
     ComparableUnion cu = ComparableUnion.binary_field(value);
     String expectedString = "<ComparableUnion binary_field:01 02 03>";
     assertEquals(expectedString, cu.toString());
+  }
+
+  public void testJavaSerializable() throws Exception {
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    ObjectOutputStream oos = new ObjectOutputStream(baos);
+    
+    TestUnion tu = TestUnion.string_field("string");
+
+    // Serialize tu the Java way...
+    oos.writeObject(tu);
+    byte[] serialized = baos.toByteArray();
+
+    // Attempt to deserialize it
+    ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
+    ObjectInputStream ois = new ObjectInputStream(bais);
+    TestUnion tu2 = (TestUnion) ois.readObject();
+
+    assertEquals(tu, tu2);
   }
 }

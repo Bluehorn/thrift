@@ -176,6 +176,8 @@ class t_as3_generator : public t_oop_generator {
   std::string as3_package();
   std::string as3_type_imports();
   std::string as3_thrift_imports();
+  std::string as3_thrift_gen_imports(t_struct* tstruct, string& imports); 
+  std::string as3_thrift_gen_imports(t_service* tservice); 
   std::string type_name(t_type* ttype, bool in_container=false, bool in_init=false);
   std::string base_type_name(t_base_type* tbase, bool in_container=false);
   std::string declare_field(t_field* tfield, bool init=false);
@@ -258,6 +260,7 @@ string t_as3_generator::as3_type_imports() {
   return
     string() +
     "import org.apache.thrift.Set;\n" +
+    "import flash.utils.ByteArray;\n" +
     "import flash.utils.Dictionary;\n\n";
 }
 
@@ -272,6 +275,63 @@ string t_as3_generator::as3_thrift_imports() {
     "import org.apache.thrift.*;\n" +
     "import org.apache.thrift.meta_data.*;\n" +
     "import org.apache.thrift.protocol.*;\n\n";
+}
+
+/**
+ * Prints imports needed for a given type
+ *
+ * @return List of imports necessary for a given t_struct
+ */
+string t_as3_generator::as3_thrift_gen_imports(t_struct* tstruct, string& imports) {
+
+  const vector<t_field*>& members = tstruct->get_members();
+  vector<t_field*>::const_iterator m_iter;
+
+  //For each type check if it is from a differnet namespace
+  for (m_iter = members.begin(); m_iter != members.end(); ++m_iter) {
+    t_program* program = (*m_iter)->get_type()->get_program();
+    if (program != NULL && program != program_) {
+      string package = program->get_namespace("as3");
+      if (!package.empty()) {
+        if (imports.find(package + "." + (*m_iter)->get_type()->get_name()) == string::npos) {
+          imports.append("import " + package + "." + (*m_iter)->get_type()->get_name() + ";\n");
+        }
+      }
+    }
+  }
+  return imports;  
+}
+
+
+/**
+ * Prints imports needed for a given type
+ *
+ * @return List of imports necessary for a given t_service
+ */
+string t_as3_generator::as3_thrift_gen_imports(t_service* tservice) {
+  string imports;
+  const vector<t_function*>& functions = tservice->get_functions();
+  vector<t_function*>::const_iterator f_iter;
+
+  //For each type check if it is from a differnet namespace
+  for (f_iter = functions.begin(); f_iter != functions.end(); ++f_iter) {
+    t_program* program = (*f_iter)->get_returntype()->get_program();
+    if (program != NULL && program != program_) {
+      string package = program->get_namespace("as3");
+      if (!package.empty()) {
+        if (imports.find(package + "." + (*f_iter)->get_returntype()->get_name()) == string::npos) {
+          imports.append("import " + package + "." + (*f_iter)->get_returntype()->get_name() + ";\n");
+        }
+      }
+    }
+
+    as3_thrift_gen_imports((*f_iter)->get_arglist(), imports);	    
+    as3_thrift_gen_imports((*f_iter)->get_xceptions(), imports);	    
+
+  }
+ 
+  return imports;
+
 }
 
 /**
@@ -408,9 +468,17 @@ void t_as3_generator::print_const_value(std::ofstream& out, string name, t_type*
   }
   if (type->is_base_type()) {
     string v2 = render_const_value(out, name, type, value);
-    out << name << ":" << type_name(type) << " = " << v2 << ";" << endl << endl;
+    out << name;
+    if (!defval) {
+      out << ":" << type_name(type);
+    }
+    out << " = " << v2 << ";" << endl << endl;
   } else if (type->is_enum()) {
-    out << name << ":" << type_name(type) << " = " << value->get_integer() << ";" << endl << endl;
+    out << name;
+    if(!defval) {
+      out << ":" << type_name(type);
+    }
+    out << " = " << value->get_integer() << ";" << endl << endl;
   } else if (type->is_struct() || type->is_xception()) {
     const vector<t_field*>& fields = ((t_struct*)type)->get_members();
     vector<t_field*>::const_iterator f_iter;
@@ -445,7 +513,11 @@ void t_as3_generator::print_const_value(std::ofstream& out, string name, t_type*
     }
     out << endl;
   } else if (type->is_map()) {
-    out << name << ":" << type_name(type) << " = new " << type_name(type, false, true) << "();" << endl;
+    out << name;
+    if(!defval){
+      out << ":" << type_name(type);
+    }
+    out << " = new " << type_name(type, false, true) << "();" << endl;
     if (!in_static) {
       indent(out) << "{" << endl;
       indent_up();
@@ -469,7 +541,11 @@ void t_as3_generator::print_const_value(std::ofstream& out, string name, t_type*
     }
     out << endl;
   } else if (type->is_list() || type->is_set()) {
-    out << name << ":" << type_name(type) << " = new " << type_name(type, false, true) << "();" << endl;
+    out << name;
+    if(!defval) {
+      out << ":" << type_name(type);
+    }
+    out << " = new " << type_name(type, false, true) << "();" << endl;
     if (!in_static) {
       indent(out) << "{" << endl;
       indent_up();
@@ -587,9 +663,12 @@ void t_as3_generator::generate_as3_struct(t_struct* tstruct,
   scope_up(f_struct);
   f_struct << endl;
   
+  string imports;
+
   f_struct <<
     as3_type_imports() <<
-    as3_thrift_imports();
+    as3_thrift_imports() << 
+    as3_thrift_gen_imports(tstruct, imports) << endl;
   
   if (bindable_ && ! is_exception) {
     f_struct << "import flash.events.Event;" << endl <<
@@ -690,9 +769,9 @@ void t_as3_generator::generate_as3_struct_definition(ofstream &out,
   "public function " << tstruct->get_name() << "() {" << endl;
   indent_up();
   for (m_iter = members.begin(); m_iter != members.end(); ++m_iter) {
-    t_type* t = get_true_type((*m_iter)->get_type());
     if ((*m_iter)->get_value() != NULL) {
-      print_const_value(out, "this." + (*m_iter)->get_name(), t, (*m_iter)->get_value(), true, true);
+      indent(out) << "this._" << (*m_iter)->get_name() << " = " << (*m_iter)->get_value()->get_integer() << ";" <<
+      endl;
     }
   }
   indent_down();
@@ -801,7 +880,7 @@ void t_as3_generator::generate_as3_struct_reader(ofstream& out,
     for (f_iter = fields.begin(); f_iter != fields.end(); ++f_iter) {
       if ((*f_iter)->get_req() == t_field::T_REQUIRED && !type_can_be_null((*f_iter)->get_type())) {
         out <<
-          indent() << "if (!__isset." << (*f_iter)->get_name() << ") {" << endl <<
+          indent() << "if (!__isset_" << (*f_iter)->get_name() << ") {" << endl <<
           indent() << "  throw new TProtocolError(TProtocolError.UNKNOWN, \"Required field '" << (*f_iter)->get_name() << "' was not found in serialized data! Struct: \" + toString());" << endl <<
           indent() << "}" << endl;
       }
@@ -1355,7 +1434,8 @@ void t_as3_generator::generate_service(t_service* tservice) {
   
   f_service_ << endl <<
     as3_type_imports() <<
-    as3_thrift_imports();
+    as3_thrift_imports() <<
+    as3_thrift_gen_imports(tservice) << endl;
 
   generate_service_interface(tservice);
 
@@ -1373,13 +1453,15 @@ void t_as3_generator::generate_service(t_service* tservice) {
   
   f_service_ << endl <<
   as3_type_imports() <<
-  as3_thrift_imports();
+  as3_thrift_imports() <<
+  as3_thrift_gen_imports(tservice) << endl;
   
   generate_service_client(tservice);
   scope_down(f_service_);
   
   f_service_ << as3_type_imports();
   f_service_ << as3_thrift_imports();
+  f_service_ << as3_thrift_gen_imports(tservice);
   f_service_ << "import " << package_name_ << ".*;" << endl;
   
   generate_service_helpers(tservice);
@@ -1397,13 +1479,15 @@ void t_as3_generator::generate_service(t_service* tservice) {
   
   f_service_ << endl <<
   as3_type_imports() <<
-  as3_thrift_imports();
+  as3_thrift_imports() <<
+  as3_thrift_gen_imports(tservice) << endl;
   
   generate_service_server(tservice);
   scope_down(f_service_);
   
   f_service_ << as3_type_imports();
   f_service_ << as3_thrift_imports();
+  f_service_ << as3_thrift_gen_imports(tservice) <<endl;
   f_service_ << "import " << package_name_ << ".*;" << endl;
   
   generate_service_helpers(tservice);
@@ -1823,21 +1907,23 @@ void t_as3_generator::generate_process_function(t_service* tservice,
   vector<t_field*>::const_iterator f_iter;
 
   f_service_ << indent();
-  if (!tfunction->is_oneway() && !tfunction->get_returntype()->is_void()) {
-    f_service_ << "result.success = ";
-  }
-  f_service_ <<
-    "iface_." << tfunction->get_name() << "(";
-  bool first = true;
-  for (f_iter = fields.begin(); f_iter != fields.end(); ++f_iter) {
-    if (first) {
-      first = false;
-    } else {
-      f_service_ << ", ";
+  if (tfunction->is_oneway()){
+    f_service_ <<
+      "iface_." << tfunction->get_name() << "(";
+    bool first = true;
+    for (f_iter = fields.begin(); f_iter != fields.end(); ++f_iter) {
+      if (first) {
+        first = false;
+      } else {
+        f_service_ << ", ";
+      } 
+      f_service_ << "args." << (*f_iter)->get_name();
     }
-    f_service_ << "args." << (*f_iter)->get_name();
+    f_service_ << ");" << endl;
+  } else {
+    f_service_ << "// sorry this operation is not supported yet" << endl;
+    f_service_ << indent() << "throw new Error(\"This is not yet supported\");" << endl;
   }
-  f_service_ << ");" << endl;
 
   // Set isset on success field
   if (!tfunction->is_oneway() && !tfunction->get_returntype()->is_void() && !type_can_be_null(tfunction->get_returntype())) {
@@ -1849,7 +1935,7 @@ void t_as3_generator::generate_process_function(t_service* tservice,
     indent_down();
     f_service_ << indent() << "}";
     for (x_iter = xceptions.begin(); x_iter != xceptions.end(); ++x_iter) {
-      f_service_ << " catch (" << type_name((*x_iter)->get_type(), false, false) << " " << (*x_iter)->get_name() << ") {" << endl;
+      f_service_ << " catch (" << (*x_iter)->get_name() << ":" << type_name((*x_iter)->get_type(), false, false) << ") {" << endl;
       if (!tfunction->is_oneway()) {
         indent_up();
         f_service_ <<
@@ -1860,10 +1946,10 @@ void t_as3_generator::generate_process_function(t_service* tservice,
         f_service_ << "}";
       }
     }
-    f_service_ << " catch (Throwable th) {" << endl;
+    f_service_ << " catch (th:Error) {" << endl;
     indent_up();
     f_service_ <<
-      indent() << "LOGGER.error(\"Internal error processing " << tfunction->get_name() << "\", th);" << endl <<
+      indent() << "trace(\"Internal error processing " << tfunction->get_name() << "\", th);" << endl <<
       indent() << "var x:TApplicationError = new TApplicationError(TApplicationError.INTERNAL_ERROR, \"Internal error processing " << tfunction->get_name() << "\");" << endl <<
       indent() << "oprot.writeMessageBegin(new TMessage(\"" << tfunction->get_name() << "\", TMessageType.EXCEPTION, seqid));" << endl <<
       indent() << "x.write(oprot);" << endl <<
@@ -2353,7 +2439,7 @@ string t_as3_generator::type_name(t_type* ttype, bool in_container, bool in_init
 }
 
 /**
- * Returns the C++ type that corresponds to the thrift type.
+ * Returns the AS3 type that corresponds to the thrift type.
  *
  * @param tbase The base type
  * @param container Is it going in a As3 container?
@@ -2368,7 +2454,7 @@ string t_as3_generator::base_type_name(t_base_type* type,
     return "void";
   case t_base_type::TYPE_STRING:
     if (type->is_binary()) {
-      return "byte[]";
+      return "ByteArray";
     } else {
       return "String";
     }

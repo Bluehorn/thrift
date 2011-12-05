@@ -17,8 +17,8 @@
 # under the License.
 #
 
-require File.dirname(__FILE__) + '/spec_helper'
-require File.dirname(__FILE__) + '/binary_protocol_spec_shared'
+require File.expand_path("#{File.dirname(__FILE__)}/spec_helper")
+require File.expand_path("#{File.dirname(__FILE__)}/binary_protocol_spec_shared")
 
 class ThriftBinaryProtocolSpec < Spec::ExampleGroup
   include Thrift
@@ -31,10 +31,8 @@ class ThriftBinaryProtocolSpec < Spec::ExampleGroup
     end
 
     it "should read a message header" do
-      @trans.should_receive(:read_all).exactly(2).times.and_return(
-        [protocol_class.const_get(:VERSION_1) | Thrift::MessageTypes::REPLY].pack('N'),
-        [42].pack('N')
-      )      
+      @trans.write([protocol_class.const_get(:VERSION_1) | Thrift::MessageTypes::REPLY].pack('N'))
+      @trans.write([42].pack('N'))
       @prot.should_receive(:read_string).and_return('testMessage')
       @prot.read_message_begin.should == ['testMessage', Thrift::MessageTypes::REPLY, 42]
     end

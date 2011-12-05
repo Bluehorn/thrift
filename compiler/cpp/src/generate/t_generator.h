@@ -133,6 +133,10 @@ class t_generator {
    * Get the current output directory
    */
   virtual std::string get_out_dir() const {
+    if (program_->is_out_path_absolute()) {
+      return program_->get_out_path() + "/";
+    }
+
     return program_->get_out_path() + out_dir_base_ + "/";
   }
 
@@ -238,6 +242,7 @@ class t_generator {
     return out.str();
   }
 
+ public:
   /**
    * Get the true type behind a series of typedefs.
    */

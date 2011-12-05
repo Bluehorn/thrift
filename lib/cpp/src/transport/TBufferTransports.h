@@ -108,7 +108,7 @@ class TBufferBase : public TVirtualTransport<TBufferBase> {
     if (TDB_LIKELY(static_cast<ptrdiff_t>(*len) <= rBound_ - rBase_)) {
       // With strict aliasing, writing to len shouldn't force us to
       // refetch rBase_ from memory.  TODO(dreiss): Verify this.
-      *len = rBound_ - rBase_;
+      *len = static_cast<uint32_t>(rBound_ - rBase_);
       return rBase_;
     }
     return borrowSlow(buf, len);
@@ -275,7 +275,9 @@ class TBufferedTransport
    * TVirtualTransport provides a default implementation of readAll().
    * We want to use the TBufferBase version instead.
    */
-  using TBufferBase::readAll;
+  uint32_t readAll(uint8_t* buf, uint32_t len) {
+    return TBufferBase::readAll(buf, len);
+  }
 
  protected:
   void initPointers() {
@@ -384,7 +386,9 @@ class TFramedTransport
    * TVirtualTransport provides a default implementation of readAll().
    * We want to use the TBufferBase version instead.
    */
-  using TBufferBase::readAll;
+  uint32_t readAll(uint8_t* buf, uint32_t len) {
+    return TBufferBase::readAll(buf,len);
+  }
 
  protected:
   /**
@@ -568,7 +572,7 @@ class TMemoryBuffer : public TVirtualTransport<TMemoryBuffer, TBufferBase> {
   // TODO(dreiss): Make bufPtr const.
   void getBuffer(uint8_t** bufPtr, uint32_t* sz) {
     *bufPtr = rBase_;
-    *sz = wBase_ - rBase_;
+    *sz = static_cast<uint32_t>(wBase_ - rBase_);
   }
 
   std::string getBufferAsString() {
@@ -656,11 +660,11 @@ class TMemoryBuffer : public TVirtualTransport<TMemoryBuffer, TBufferBase> {
 
   uint32_t available_read() const {
     // Remember, wBase_ is the real rBound_.
-    return wBase_ - rBase_;
+    return static_cast<uint32_t>(wBase_ - rBase_);
   }
 
   uint32_t available_write() const {
-    return wBound_ - wBase_;
+    return static_cast<uint32_t>(wBound_ - wBase_);
   }
 
   // Returns a pointer to where the client can write data to append to
@@ -681,7 +685,9 @@ class TMemoryBuffer : public TVirtualTransport<TMemoryBuffer, TBufferBase> {
    * TVirtualTransport provides a default implementation of readAll().
    * We want to use the TBufferBase version instead.
    */
-  using TBufferBase::readAll;
+  uint32_t readAll(uint8_t* buf, uint32_t len) {
+    return TBufferBase::readAll(buf,len);
+  }
 
  protected:
   void swap(TMemoryBuffer& that) {

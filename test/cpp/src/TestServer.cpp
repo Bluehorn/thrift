@@ -17,14 +17,25 @@
  * under the License.
  */
 
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+
 #include <concurrency/ThreadManager.h>
-#include <concurrency/PosixThreadFactory.h>
+#include <concurrency/PlatformThreadFactory.h>
 #include <protocol/TBinaryProtocol.h>
+#include <protocol/TJSONProtocol.h>
 #include <server/TSimpleServer.h>
 #include <server/TThreadedServer.h>
 #include <server/TThreadPoolServer.h>
+#include <async/TEvhttpServer.h>
+#include <async/TAsyncBufferProcessor.h>
+#include <async/TAsyncProtocolProcessor.h>
 #include <server/TNonblockingServer.h>
 #include <transport/TServerSocket.h>
+#include <transport/TSSLServerSocket.h>
+#include <transport/TSSLSocket.h>
+#include <transport/THttpServer.h>
+#include <transport/THttpTransport.h>
 #include <transport/TTransportUtils.h>
 #include "ThriftTest.h"
 
@@ -32,8 +43,9 @@
 #include <stdexcept>
 #include <sstream>
 
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h>
+#include <boost/program_options.hpp>
+
+#include <signal.h>
 
 using namespace std;
 using namespace boost;
@@ -43,6 +55,7 @@ using namespace apache::thrift::concurrency;
 using namespace apache::thrift::protocol;
 using namespace apache::thrift::transport;
 using namespace apache::thrift::server;
+using namespace apache::thrift::async;
 
 using namespace thrift::test;
 
@@ -75,7 +88,7 @@ class TestHandler : public ThriftTestIf {
   }
 
   double testDouble(const double thing) {
-    printf("testDouble(%lf)\n", thing);
+    printf("testDouble(%f)\n", thing);
     return thing;
   }
 
@@ -101,6 +114,22 @@ class TestHandler : public ThriftTestIf {
         printf(", ");
       }
       printf("%d => %d", m_iter->first, m_iter->second);
+    }
+    printf("})\n");
+    out = thing;
+  }
+
+  void testStringMap(map<std::string, std::string> &out, const map<std::string, std::string> &thing) {
+    printf("testMap({");
+    map<std::string, std::string>::const_iterator m_iter;
+    bool first = true;
+    for (m_iter = thing.begin(); m_iter != thing.end(); ++m_iter) {
+      if (first) {
+        first = false;
+      } else {
+        printf(", ");
+      }
+      printf("%s => %s", (m_iter->first).c_str(), (m_iter->second).c_str());
     }
     printf("})\n");
     out = thing;
@@ -164,6 +193,7 @@ class TestHandler : public ThriftTestIf {
   }
 
   void testInsanity(map<UserId, map<Numberz::type,Insanity> > &insane, const Insanity &argument) {
+    (void) argument;
     printf("testInsanity()\n");
 
     Xtruct hello;
@@ -233,6 +263,10 @@ class TestHandler : public ThriftTestIf {
   }
 
   void testMulti(Xtruct &hello, const int8_t arg0, const int32_t arg1, const int64_t arg2, const std::map<int16_t, std::string>  &arg3, const Numberz::type arg4, const UserId arg5) {
+    (void) arg3;
+    (void) arg4;
+    (void) arg5;
+    
     printf("testMulti()\n");
 
     hello.string_thing = "Hello2";
@@ -290,21 +324,25 @@ class TestHandler : public ThriftTestIf {
 
 class TestProcessorEventHandler : public TProcessorEventHandler {
   virtual void* getContext(const char* fn_name, void* serverContext) {
+    (void) serverContext;
     return new std::string(fn_name);
   }
   virtual void freeContext(void* ctx, const char* fn_name) {
+    (void) fn_name;
     delete static_cast<std::string*>(ctx);
   }
   virtual void preRead(void* ctx, const char* fn_name) {
     communicate("preRead", ctx, fn_name);
   }
   virtual void postRead(void* ctx, const char* fn_name, uint32_t bytes) {
+    (void) bytes;
     communicate("postRead", ctx, fn_name);
   }
   virtual void preWrite(void* ctx, const char* fn_name) {
     communicate("preWrite", ctx, fn_name);
   }
   virtual void postWrite(void* ctx, const char* fn_name, uint32_t bytes) {
+    (void) bytes;
     communicate("postWrite", ctx, fn_name);
   }
   virtual void asyncComplete(void* ctx, const char* fn_name) {
@@ -320,146 +358,327 @@ class TestProcessorEventHandler : public TProcessorEventHandler {
 };
 
 
-int main(int argc, char **argv) {
+class TestHandlerAsync : public ThriftTestCobSvIf {
+public:
+  TestHandlerAsync(shared_ptr<TestHandler>& handler) : _delegate(handler) {}
+  virtual ~TestHandlerAsync() {}
 
-  int port = 9090;
-  string serverType = "simple";
-  string protocolType = "binary";
-  size_t workerCount = 4;
-
-  ostringstream usage;
-
-  usage <<
-    argv[0] << " [--port=<port number>] [--server-type=<server-type>] [--protocol-type=<protocol-type>] [--workers=<worker-count>] [--processor-events]" << endl <<
-
-    "\t\tserver-type\t\ttype of server, \"simple\", \"thread-pool\", \"threaded\", or \"nonblocking\".  Default is " << serverType << endl <<
-
-    "\t\tprotocol-type\t\ttype of protocol, \"binary\", \"ascii\", or \"xml\".  Default is " << protocolType << endl <<
-
-    "\t\tworkers\t\tNumber of thread pools workers.  Only valid for thread-pool server type.  Default is " << workerCount << endl;
-
-  map<string, string>  args;
-
-  for (int ix = 1; ix < argc; ix++) {
-    string arg(argv[ix]);
-    if (arg.compare(0,2, "--") == 0) {
-      size_t end = arg.find_first_of("=", 2);
-      if (end != string::npos) {
-	args[string(arg, 2, end - 2)] = string(arg, end + 1);
-      } else {
-	args[string(arg, 2)] = "true";
-      }
-    } else {
-      throw invalid_argument("Unexcepted command line token: "+arg);
-    }
+  virtual void testVoid(std::tr1::function<void()> cob) {
+    _delegate->testVoid();
+    cob();
   }
 
+  virtual void testString(std::tr1::function<void(std::string const& _return)> cob, const std::string& thing) {
+    std::string res;
+    _delegate->testString(res, thing);
+    cob(res);
+  }
+
+  virtual void testByte(std::tr1::function<void(int8_t const& _return)> cob, const int8_t thing) {
+    int8_t res = _delegate->testByte(thing);
+    cob(res);
+  }
+
+  virtual void testI32(std::tr1::function<void(int32_t const& _return)> cob, const int32_t thing) {
+    int32_t res = _delegate->testI32(thing);
+    cob(res);
+  }
+
+  virtual void testI64(std::tr1::function<void(int64_t const& _return)> cob, const int64_t thing) {
+    int64_t res = _delegate->testI64(thing);
+    cob(res);
+  }
+
+  virtual void testDouble(std::tr1::function<void(double const& _return)> cob, const double thing) {
+    double res = _delegate->testDouble(thing);
+    cob(res);
+  }
+
+  virtual void testStruct(std::tr1::function<void(Xtruct const& _return)> cob, const Xtruct& thing) {
+    Xtruct res;
+    _delegate->testStruct(res, thing);
+    cob(res);
+  }
+
+  virtual void testNest(std::tr1::function<void(Xtruct2 const& _return)> cob, const Xtruct2& thing) {
+    Xtruct2 res;
+    _delegate->testNest(res, thing);
+    cob(res);
+  }
+
+  virtual void testMap(std::tr1::function<void(std::map<int32_t, int32_t>  const& _return)> cob, const std::map<int32_t, int32_t> & thing) {
+    std::map<int32_t, int32_t> res;
+    _delegate->testMap(res, thing);
+    cob(res);
+  }
+
+  virtual void testStringMap(std::tr1::function<void(std::map<std::string, std::string>  const& _return)> cob, const std::map<std::string, std::string> & thing) {
+    std::map<std::string, std::string> res;
+    _delegate->testStringMap(res, thing);
+    cob(res);
+  }
+
+  virtual void testSet(std::tr1::function<void(std::set<int32_t>  const& _return)> cob, const std::set<int32_t> & thing) {
+    std::set<int32_t> res;
+    _delegate->testSet(res, thing);
+    cob(res);
+  }
+
+  virtual void testList(std::tr1::function<void(std::vector<int32_t>  const& _return)> cob, const std::vector<int32_t> & thing) {
+    std::vector<int32_t> res;
+    _delegate->testList(res, thing);
+    cob(res);
+  }
+
+  virtual void testEnum(std::tr1::function<void(Numberz::type const& _return)> cob, const Numberz::type thing) {
+    Numberz::type res = _delegate->testEnum(thing);
+    cob(res);
+  }
+
+  virtual void testTypedef(std::tr1::function<void(UserId const& _return)> cob, const UserId thing) {
+    UserId res = _delegate->testTypedef(thing);
+    cob(res);
+  }
+
+  virtual void testMapMap(std::tr1::function<void(std::map<int32_t, std::map<int32_t, int32_t> >  const& _return)> cob, const int32_t hello) {
+    std::map<int32_t, std::map<int32_t, int32_t> > res;
+    _delegate->testMapMap(res, hello);
+    cob(res);
+  }
+
+  virtual void testInsanity(std::tr1::function<void(std::map<UserId, std::map<Numberz::type, Insanity> >  const& _return)> cob, const Insanity& argument) {
+    std::map<UserId, std::map<Numberz::type, Insanity> > res; 
+    _delegate->testInsanity(res, argument);
+    cob(res);
+ }
+
+  virtual void testMulti(std::tr1::function<void(Xtruct const& _return)> cob, const int8_t arg0, const int32_t arg1, const int64_t arg2, const std::map<int16_t, std::string> & arg3, const Numberz::type arg4, const UserId arg5) {
+    Xtruct res;
+    _delegate->testMulti(res, arg0, arg1, arg2, arg3, arg4, arg5);
+    cob(res);
+  }
+
+  virtual void testException(std::tr1::function<void()> cob, std::tr1::function<void(::apache::thrift::TDelayedException* _throw)> exn_cob, const std::string& arg) {
+    try {
+      _delegate->testException(arg);
+    } catch(const apache::thrift::TException& e) {
+      exn_cob(apache::thrift::TDelayedException::delayException(e));
+      return;
+    }
+    cob();
+  }
+
+  virtual void testMultiException(std::tr1::function<void(Xtruct const& _return)> cob, std::tr1::function<void(::apache::thrift::TDelayedException* _throw)> exn_cob, const std::string& arg0, const std::string& arg1) {
+    Xtruct res;
+    try {
+      _delegate->testMultiException(res, arg0, arg1);
+    } catch(const apache::thrift::TException& e) {
+      exn_cob(apache::thrift::TDelayedException::delayException(e));
+      return;
+    }
+    cob(res);
+  }
+
+  virtual void testOneway(std::tr1::function<void()> cob, const int32_t secondsToSleep) {
+    _delegate->testOneway(secondsToSleep);
+    cob();
+  }
+
+protected:
+  shared_ptr<TestHandler> _delegate;
+};
+
+
+int main(int argc, char **argv) {
+  int port = 9090;
+  bool ssl = false;
+  string transport_type = "buffered";
+  string protocol_type = "binary";
+  string server_type = "simple";
+  string domain_socket = "";
+  size_t workers = 4;
+
+ 
+  program_options::options_description desc("Allowed options");
+  desc.add_options()
+      ("help,h", "produce help message")
+      ("port", program_options::value<int>(&port)->default_value(port), "Port number to listen")
+	  ("domain-socket", program_options::value<string>(&domain_socket)->default_value(domain_socket),
+	    "Unix Domain Socket (e.g. /tmp/ThriftTest.thrift)")
+      ("server-type", program_options::value<string>(&server_type)->default_value(server_type),
+        "type of server, \"simple\", \"thread-pool\", \"threaded\", or \"nonblocking\"")
+      ("transport", program_options::value<string>(&transport_type)->default_value(transport_type),
+        "transport: buffered, framed, http")
+      ("protocol", program_options::value<string>(&protocol_type)->default_value(protocol_type),
+        "protocol: binary, json")
+	  ("ssl", "Encrypted Transport using SSL")
+	  ("processor-events", "processor-events")
+      ("workers,n", program_options::value<size_t>(&workers)->default_value(workers),
+        "Number of thread pools workers. Only valid for thread-pool server type")
+  ;
+
+  program_options::variables_map vm;
+  program_options::store(program_options::parse_command_line(argc, argv, desc), vm);
+  program_options::notify(vm);    
+
+  if (vm.count("help")) {
+      cout << desc << "\n";
+      return 1;
+  }
+  
   try {
-
-    if (!args["port"].empty()) {
-      port = atoi(args["port"].c_str());
-    }
-
-    if (!args["server-type"].empty()) {
-      serverType = args["server-type"];
-      if (serverType == "simple") {
-      } else if (serverType == "thread-pool") {
-      } else if (serverType == "threaded") {
-      } else if (serverType == "nonblocking") {
+    if (!server_type.empty()) {
+      if (server_type == "simple") {
+      } else if (server_type == "thread-pool") {
+      } else if (server_type == "threaded") {
+      } else if (server_type == "nonblocking") {
       } else {
-	throw invalid_argument("Unknown server type "+serverType);
+          throw invalid_argument("Unknown server type "+server_type);
+      }
+    }
+    
+    if (!protocol_type.empty()) {
+      if (protocol_type == "binary") {
+      } else if (protocol_type == "json") {
+      } else {
+          throw invalid_argument("Unknown protocol type "+protocol_type);
       }
     }
 
-    if (!args["protocol-type"].empty()) {
-      protocolType = args["protocol-type"];
-      if (protocolType == "binary") {
-      } else if (protocolType == "ascii") {
-	throw invalid_argument("ASCII protocol not supported");
-      } else if (protocolType == "xml") {
-	throw invalid_argument("XML protocol not supported");
+	if (!transport_type.empty()) {
+      if (transport_type == "buffered") {
+      } else if (transport_type == "framed") {
+      } else if (transport_type == "http") {
       } else {
-	throw invalid_argument("Unknown protocol type "+protocolType);
+          throw invalid_argument("Unknown transport type "+transport_type);
       }
     }
 
-    if (!args["workers"].empty()) {
-      workerCount = atoi(args["workers"].c_str());
-    }
   } catch (std::exception& e) {
     cerr << e.what() << endl;
-    cerr << usage;
+    cout << desc << "\n";
+    return 1;
+  }
+
+  if (vm.count("ssl")) {
+    ssl = true;
+    signal(SIGPIPE, SIG_IGN);
   }
 
   // Dispatcher
-  shared_ptr<TProtocolFactory> protocolFactory(
-      new TBinaryProtocolFactoryT<TBufferBase>());
+  shared_ptr<TProtocolFactory> protocolFactory;
+  if (protocol_type == "json") {
+    shared_ptr<TProtocolFactory> jsonProtocolFactory(new TJSONProtocolFactory());
+    protocolFactory = jsonProtocolFactory;
+  } else {
+    shared_ptr<TProtocolFactory> binaryProtocolFactory(new TBinaryProtocolFactoryT<TBufferBase>());
+    protocolFactory = binaryProtocolFactory;
+  }
 
+  // Processor
   shared_ptr<TestHandler> testHandler(new TestHandler());
-
-  shared_ptr<TProcessor> testProcessor(
-      new ThriftTestProcessorT< TBinaryProtocolT<TBufferBase> >(testHandler));
-
-
-  if (!args["processor-events"].empty()) {
+  shared_ptr<ThriftTestProcessor> testProcessor(new ThriftTestProcessor(testHandler));
+  
+  if (vm.count("processor-events")) {
     testProcessor->setEventHandler(shared_ptr<TProcessorEventHandler>(
           new TestProcessorEventHandler()));
   }
-
+  
   // Transport
-  shared_ptr<TServerSocket> serverSocket(new TServerSocket(port));
+  shared_ptr<TSSLSocketFactory> sslSocketFactory;
+  shared_ptr<TServerSocket> serverSocket;
+
+  if (ssl) {
+    sslSocketFactory = shared_ptr<TSSLSocketFactory>(new TSSLSocketFactory());
+    sslSocketFactory->loadCertificate("./server-certificate.pem");
+    sslSocketFactory->loadPrivateKey("./server-private-key.pem");
+    sslSocketFactory->ciphers("ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+    serverSocket = shared_ptr<TServerSocket>(new TSSLServerSocket(port, sslSocketFactory));
+  } else {
+	if (domain_socket != "") {
+	  unlink(domain_socket.c_str());
+	  serverSocket = shared_ptr<TServerSocket>(new TServerSocket(domain_socket));
+	  port = 0;
+	}
+	else {
+      serverSocket = shared_ptr<TServerSocket>(new TServerSocket(port));
+	}
+  }
 
   // Factory
-  shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
+  shared_ptr<TTransportFactory> transportFactory;
+  
+  if (transport_type == "http" && server_type != "nonblocking") {
+    shared_ptr<TTransportFactory> httpTransportFactory(new THttpServerTransportFactory()); 
+    transportFactory = httpTransportFactory;
+  } else if (transport_type == "framed") {
+    shared_ptr<TTransportFactory> framedTransportFactory(new TFramedTransportFactory()); 
+    transportFactory = framedTransportFactory;
+  } else {
+    shared_ptr<TTransportFactory> bufferedTransportFactory(new TBufferedTransportFactory()); 
+    transportFactory = bufferedTransportFactory;
+  }
 
-  if (serverType == "simple") {
+  // Server Info
+  cout << "Starting \"" << server_type << "\" server ("
+    << transport_type << "/" << protocol_type << ") listen on: " << domain_socket;
+  if (port != 0) {
+    cout << port;
+  }
+  cout << endl;
 
-    // Server
+  // Server
+  if (server_type == "simple") {
     TSimpleServer simpleServer(testProcessor,
-			       serverSocket,
+                               serverSocket,
                                transportFactory,
                                protocolFactory);
 
-    printf("Starting the server on port %d...\n", port);
     simpleServer.serve();
 
-  } else if (serverType == "thread-pool") {
+  } else if (server_type == "thread-pool") {
 
     shared_ptr<ThreadManager> threadManager =
-      ThreadManager::newSimpleThreadManager(workerCount);
+      ThreadManager::newSimpleThreadManager(workers);
 
-    shared_ptr<PosixThreadFactory> threadFactory =
-      shared_ptr<PosixThreadFactory>(new PosixThreadFactory());
+    shared_ptr<PlatformThreadFactory> threadFactory =
+      shared_ptr<PlatformThreadFactory>(new PlatformThreadFactory());
 
     threadManager->threadFactory(threadFactory);
 
     threadManager->start();
 
     TThreadPoolServer threadPoolServer(testProcessor,
-				       serverSocket,
+                                       serverSocket,
                                        transportFactory,
                                        protocolFactory,
-				       threadManager);
+                                       threadManager);
 
-    printf("Starting the server on port %d...\n", port);
     threadPoolServer.serve();
 
-  } else if (serverType == "threaded") {
+  } else if (server_type == "threaded") {
 
     TThreadedServer threadedServer(testProcessor,
                                    serverSocket,
                                    transportFactory,
                                    protocolFactory);
 
-    printf("Starting the server on port %d...\n", port);
     threadedServer.serve();
 
-  } else if (serverType == "nonblocking") {
-    TNonblockingServer nonblockingServer(testProcessor, port);
-    printf("Starting the nonblocking server on port %d...\n", port);
-    nonblockingServer.serve();
+  } else if (server_type == "nonblocking") {
+    if(transport_type == "http") {
+      shared_ptr<TestHandlerAsync> testHandlerAsync(new TestHandlerAsync(testHandler));
+      shared_ptr<TAsyncProcessor> testProcessorAsync(new ThriftTestAsyncProcessor(testHandlerAsync));
+      shared_ptr<TAsyncBufferProcessor> testBufferProcessor(new TAsyncProtocolProcessor(testProcessorAsync, protocolFactory));
+      
+      TEvhttpServer nonblockingServer(testBufferProcessor, port);
+      nonblockingServer.serve();
+} else {
+      TNonblockingServer nonblockingServer(testProcessor, port);
+      nonblockingServer.serve();
+    }
   }
 
-  printf("done.\n");
+  cout << "done." << endl;
   return 0;
 }

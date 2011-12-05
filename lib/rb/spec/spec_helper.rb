@@ -18,8 +18,6 @@
 #
 
 require 'rubygems'
-# require at least 1.1.4 to fix a bug with describing Modules
-gem 'rspec', '>= 1.1.4'
 require 'spec'
 
 $:.unshift File.join(File.dirname(__FILE__), *%w[.. ext])
@@ -44,7 +42,7 @@ Spec::Runner.configure do |configuration|
   end
 end
 
-$:.unshift File.join(File.dirname(__FILE__), *%w[.. debug_proto_test gen-rb])
+$:.unshift File.join(File.dirname(__FILE__), *%w[.. test debug_proto gen-rb])
 require "srv"
 require "debug_proto_test_constants"
 

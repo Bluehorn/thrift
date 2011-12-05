@@ -19,6 +19,7 @@
 
 THRIFTCODE= \
             src/Collections/THashSet.cs \
+            src/Properties/AssemblyInfo.cs \
             src/Protocol/TBase.cs \
             src/Protocol/TBase64Utils.cs \
             src/Protocol/TJSONProtocol.cs \
@@ -49,6 +50,7 @@ THRIFTCODE= \
             src/Transport/TServerSocket.cs \
             src/Transport/TTransportFactory.cs \
             src/Transport/THttpClient.cs \
+            src/Transport/THttpHandler.cs \
             src/TProcessor.cs \
             src/TApplicationException.cs
 
@@ -62,7 +64,7 @@ endif
 all-local: Thrift.dll
 
 Thrift.dll: $(THRIFTCODE)
-	$(CSC) $(THRIFTCODE) /out:Thrift.dll /target:library $(MONO_DEFINES)
+	$(CSC) $(THRIFTCODE) /out:Thrift.dll /target:library /reference:System.Web $(MONO_DEFINES)
 
 clean-local:
 	$(RM) Thrift.dll

@@ -31,6 +31,9 @@ namespace js ThriftTest
 namespace st ThriftTest
 namespace py ThriftTest
 namespace py.twisted ThriftTest
+namespace go ThriftTest
+namespace php ThriftTest
+namespace delphi Thrift.Test
 namespace * thrift.test
 
 /**
@@ -127,6 +130,7 @@ service ThriftTest
   Xtruct       testStruct(1: Xtruct thing),
   Xtruct2      testNest(1: Xtruct2 thing),
   map<i32,i32> testMap(1: map<i32,i32> thing),
+  map<string,string> testStringMap(1: map<string,string> thing),
   set<i32>     testSet(1: set<i32> thing),
   list<i32>    testList(1: list<i32> thing),
   Numberz      testEnum(1: Numberz thing),
@@ -191,4 +195,40 @@ struct ListTypeVersioningV2 {
 
 struct GuessProtocolStruct {
   7: map<string,string> map_field,
+}
+
+struct LargeDeltas {
+  1: Bools b1,
+  10: Bools b10,
+  100: Bools b100,
+  500: bool check_true,
+  1000: Bools b1000,
+  1500: bool check_false,
+  2000: VersioningTestV2 vertwo2000,
+  2500: set<string> a_set2500,
+  3000: VersioningTestV2 vertwo3000,
+  4000: list<i32> big_numbers
+}
+
+struct NestedListsI32x2 {
+  1: list<list<i32>> integerlist
+}
+struct NestedListsI32x3 {
+  1: list<list<list<i32>>> integerlist
+}
+struct NestedMixedx2 {
+  1: list<set<i32>> int_set_list
+  2: map<i32,set<string>> map_int_strset
+  3: list<map<i32,set<string>>> map_int_strset_list
+}
+struct ListBonks {
+  1: list<Bonk> bonk
+}
+struct NestedListsBonk {
+  1: list<list<list<Bonk>>> bonk
+}
+
+struct BoolTest {
+  1: optional bool b = true;
+  2: optional string s = "true";
 }

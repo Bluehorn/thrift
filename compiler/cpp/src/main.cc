@@ -152,6 +152,16 @@ char* g_doctext;
 int g_doctext_lineno;
 
 /**
+ * Whether or not negative field keys are accepted.
+ */
+int g_allow_neg_field_keys;
+
+/**
+ * Whether or not 64-bit constants will generate a warning.
+ */
+int g_allow_64bit_consts = 0;
+
+/**
  * Flags to control code generation
  */
 bool gen_cpp = false;
@@ -174,6 +184,7 @@ bool gen_ocaml = false;
 bool gen_hs = false;
 bool gen_cocoa = false;
 bool gen_csharp = false;
+bool gen_delphi = false;
 bool gen_st = false;
 bool gen_recurse = false;
 
@@ -630,6 +641,8 @@ void usage() {
   fprintf(stderr, "  -version    Print the compiler version\n");
   fprintf(stderr, "  -o dir      Set the output directory for gen-* packages\n");
   fprintf(stderr, "               (default: current directory)\n");
+  fprintf(stderr, "  -out dir    Set the ouput location for generated files.\n");
+  fprintf(stderr,"               (no gen-* folder will be created)\n");
   fprintf(stderr, "  -I dir      Add a directory to the list of directories\n");
   fprintf(stderr, "                searched for include directives\n");
   fprintf(stderr, "  -nowarn     Suppress all compiler warnings (BAD!)\n");
@@ -637,6 +650,10 @@ void usage() {
   fprintf(stderr, "  -v[erbose]  Verbose mode\n");
   fprintf(stderr, "  -r[ecurse]  Also generate included files\n");
   fprintf(stderr, "  -debug      Parse debug trace to stdout\n");
+  fprintf(stderr, "  --allow-neg-keys  Allow negative field keys (Used to "
+          "preserve protocol\n");
+  fprintf(stderr, "                compatibility with older .thrift files)\n");
+  fprintf(stderr, "  --allow-64bit-consts  Do not print warnings about using 64-bit constants\n");
   fprintf(stderr, "  --gen STR   Generate code with a dynamically-registered generator.\n");
   fprintf(stderr, "                STR has the form language[:key1=val1[,key2,[key3=val3]]].\n");
   fprintf(stderr, "                Keys and values are options passed to the generator.\n");
@@ -803,7 +820,7 @@ bool validate_throws(t_struct* throws) {
   const vector<t_field*>& members = throws->get_members();
   vector<t_field*>::const_iterator m_iter;
   for (m_iter = members.begin(); m_iter != members.end(); ++m_iter) {
-    if (!(*m_iter)->get_type()->is_xception()) {
+    if (!t_generator::get_true_type((*m_iter)->get_type())->is_xception()) {
       return false;
     }
   }
@@ -881,7 +898,7 @@ void generate(t_program* program, const vector<string>& generator_strings) {
     const vector<t_program*>& includes = program->get_includes();
     for (size_t i = 0; i < includes.size(); ++i) {
       // Propogate output path from parent to child programs
-      includes[i]->set_out_path(program->get_out_path());
+      includes[i]->set_out_path(program->get_out_path(), program->is_out_path_absolute());
 
       generate(includes[i], generator_strings);
     }
@@ -926,6 +943,7 @@ void generate(t_program* program, const vector<string>& generator_strings) {
 int main(int argc, char** argv) {
   int i;
   std::string out_path;
+  bool out_path_is_absolute = false;
 
   // Setup time string
   time_t now = time(NULL);
@@ -967,6 +985,10 @@ int main(int argc, char** argv) {
         g_verbose = 1;
       } else if (strcmp(arg, "-r") == 0 || strcmp(arg, "-recurse") == 0 ) {
         gen_recurse = true;
+      } else if (strcmp(arg, "-allow-neg-keys") == 0) {
+        g_allow_neg_field_keys = true;
+      } else if (strcmp(arg, "-allow-64bit-consts") == 0) {
+        g_allow_64bit_consts = true;
       } else if (strcmp(arg, "-gen") == 0) {
         arg = argv[++i];
         if (arg == NULL) {
@@ -1024,6 +1046,8 @@ int main(int argc, char** argv) {
         gen_st = true;
       } else if (strcmp(arg, "-csharp") == 0) {
         gen_csharp = true;
+      } else if (strcmp(arg, "-delphi") == 0) {
+        gen_delphi = true;
       } else if (strcmp(arg, "-cpp_use_include_prefix") == 0) {
         g_cpp_use_include_prefix = true;
       } else if (strcmp(arg, "-I") == 0) {
@@ -1035,8 +1059,10 @@ int main(int argc, char** argv) {
           usage();
         }
         g_incl_searchpath.push_back(arg);
-      } else if (strcmp(arg, "-o") == 0) {
-        arg = argv[++i];
+      } else if ((strcmp(arg, "-o") == 0) || (strcmp(arg, "-out") == 0)) {
+        out_path_is_absolute = (strcmp(arg, "-out") == 0) ? true : false;
+		  
+		arg = argv[++i];
         if (arg == NULL) {
           fprintf(stderr, "-o: missing output directory\n");
           usage();
@@ -1100,6 +1126,10 @@ int main(int argc, char** argv) {
   if (gen_csharp) {
     pwarning(1, "-csharp is deprecated.  Use --gen csharp");
     generator_strings.push_back("csharp");
+  }
+  if (gen_delphi) {
+    pwarning(1, "-delphi is deprecated.  Use --gen delphi");
+    generator_strings.push_back("delphi");
   }
   if (gen_py) {
     pwarning(1, "-py is deprecated.  Use --gen py");
@@ -1174,7 +1204,7 @@ int main(int argc, char** argv) {
   // Instance of the global parse tree
   t_program* program = new t_program(input_file);
   if (out_path.size()) {
-    program->set_out_path(out_path);
+    program->set_out_path(out_path, out_path_is_absolute);
   }
 
   // Compute the cpp include prefix.

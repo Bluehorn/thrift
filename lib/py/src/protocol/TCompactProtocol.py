@@ -1,3 +1,22 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
 from TProtocol import *
 from struct import pack, unpack
 
@@ -52,8 +71,9 @@ def readVarint(trans):
     shift += 7
 
 class CompactType:
-  TRUE = 1
-  FALSE = 2
+  STOP = 0x00
+  TRUE = 0x01
+  FALSE = 0x02
   BYTE = 0x03
   I16 = 0x04
   I32 = 0x05
@@ -65,7 +85,8 @@ class CompactType:
   MAP = 0x0B
   STRUCT = 0x0C
 
-CTYPES = {TType.BOOL: CompactType.TRUE, # used for collection
+CTYPES = {TType.STOP: CompactType.STOP,
+          TType.BOOL: CompactType.TRUE, # used for collection
           TType.BYTE: CompactType.BYTE,
           TType.I16: CompactType.I16,
           TType.I32: CompactType.I32,
@@ -75,7 +96,7 @@ CTYPES = {TType.BOOL: CompactType.TRUE, # used for collection
           TType.STRUCT: CompactType.STRUCT,
           TType.LIST: CompactType.LIST,
           TType.SET: CompactType.SET,
-          TType.MAP: CompactType.MAP,
+          TType.MAP: CompactType.MAP
           }
 
 TTYPES = {}
@@ -196,11 +217,18 @@ class TCompactProtocol(TProtocolBase):
 
   def writeBool(self, bool):
     if self.state == BOOL_WRITE:
-      self.__writeFieldHeader(types[bool], self.__bool_fid)
+        if bool:
+            ctype = CompactType.TRUE
+        else:
+            ctype = CompactType.FALSE
+        self.__writeFieldHeader(ctype, self.__bool_fid)
     elif self.state == CONTAINER_WRITE:
-      self.__writeByte(int(bool))
+       if bool:
+           self.__writeByte(CompactType.TRUE)
+       else:
+           self.__writeByte(CompactType.FALSE)
     else:
-      raise AssertetionError, "Invalid state in compact protocol"
+      raise AssertionError, "Invalid state in compact protocol"
 
   writeByte = writer(__writeByte)
   writeI16 = writer(__writeI16)
@@ -285,9 +313,8 @@ class TCompactProtocol(TProtocolBase):
     return (name, type, seqid)
 
   def readMessageEnd(self):
-    assert self.state == VALUE_READ
+    assert self.state == CLEAR
     assert len(self.__structs) == 0
-    self.state = CLEAR
 
   def readStructBegin(self):
     assert self.state in (CLEAR, CONTAINER_READ, VALUE_READ), self.state
@@ -333,9 +360,9 @@ class TCompactProtocol(TProtocolBase):
 
   def readBool(self):
     if self.state == BOOL_READ:
-      return self.__bool_value
+      return self.__bool_value == CompactType.TRUE
     elif self.state == CONTAINER_READ:
-      return bool(self.__readByte())
+      return self.__readByte() == CompactType.TRUE
     else:
       raise AssertionError, "Invalid state in compact protocol: %d" % self.state
 

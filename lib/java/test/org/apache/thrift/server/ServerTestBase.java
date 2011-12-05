@@ -29,6 +29,7 @@ import java.util.Set;
 import junit.framework.TestCase;
 
 import org.apache.thrift.TException;
+import org.apache.thrift.TApplicationException;
 import org.apache.thrift.TProcessor;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TCompactProtocol;
@@ -37,13 +38,7 @@ import org.apache.thrift.protocol.TProtocolFactory;
 import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TTransport;
 
-import thrift.test.Insanity;
-import thrift.test.Numberz;
-import thrift.test.ThriftTest;
-import thrift.test.Xception;
-import thrift.test.Xception2;
-import thrift.test.Xtruct;
-import thrift.test.Xtruct2;
+import thrift.test.*;
 
 public abstract class ServerTestBase extends TestCase {
 
@@ -103,15 +98,14 @@ public abstract class ServerTestBase extends TestCase {
   
     public Map<Integer,Integer> testMap(Map<Integer,Integer> thing) {
       System.out.print("testMap({");
-      boolean first = true;
-      for (int key : thing.keySet()) {
-        if (first) {
-          first = false;
-        } else {
-          System.out.print(", ");
-        }
-        System.out.print(key + " => " + thing.get(key));
-      }
+      System.out.print(thing);
+      System.out.print("})\n");
+      return thing;
+    }
+
+    public Map<String,String> testStringMap(Map<String,String> thing) {
+      System.out.print("testStringMap({");
+      System.out.print(thing);
       System.out.print("})\n");
       return thing;
     }
@@ -191,13 +185,10 @@ public abstract class ServerTestBase extends TestCase {
   
       Insanity crazy = new Insanity();
       crazy.userMap = new HashMap<Numberz, Long>();
-      crazy.xtructs = new ArrayList<Xtruct>();
-  
       crazy.userMap.put(Numberz.EIGHT, (long)8);
-      crazy.xtructs.add(goodbye);
-  
-      Insanity looney = new Insanity();
       crazy.userMap.put(Numberz.FIVE, (long)5);
+      crazy.xtructs = new ArrayList<Xtruct>();
+      crazy.xtructs.add(goodbye);
       crazy.xtructs.add(hello);
   
       HashMap<Numberz,Insanity> first_map = new HashMap<Numberz, Insanity>();
@@ -206,6 +197,7 @@ public abstract class ServerTestBase extends TestCase {
       first_map.put(Numberz.TWO, crazy);
       first_map.put(Numberz.THREE, crazy);
   
+      Insanity looney = new Insanity();
       second_map.put(Numberz.SIX, looney);
   
       Map<Long,Map<Numberz,Insanity>> insane =
@@ -227,13 +219,18 @@ public abstract class ServerTestBase extends TestCase {
       return hello;
     }
   
-    public void testException(String arg) throws Xception {
+    public void testException(String arg) throws Xception, TException {
       System.out.print("testException("+arg+")\n");
       if (arg.equals("Xception")) {
         Xception x = new Xception();
         x.errorCode = 1001;
-        x.message = "This is an Xception";
+        x.message = arg;
         throw x;
+      } else if (arg.equals("ApplicationException")) {
+        throw new TException(arg);
+      } else {
+        Xtruct result = new Xtruct();
+        result.string_thing = arg;
       }
       return;
     }
@@ -390,6 +387,7 @@ public abstract class ServerTestBase extends TestCase {
       testStruct(testClient);
       testNestedStruct(testClient);
       testMap(testClient);
+      testStringMap(testClient);
       testSet(testClient);
       testList(testClient);
       testEnum(testClient);
@@ -397,6 +395,7 @@ public abstract class ServerTestBase extends TestCase {
       testNestedMap(testClient);
       testInsanity(testClient);
       testOneway(testClient);
+      testException(testClient);
       transport.close();
 
       stopServer();
@@ -426,6 +425,16 @@ public abstract class ServerTestBase extends TestCase {
       mapout.put(i, i-10);
     }
     Map<Integer,Integer> mapin = testClient.testMap(mapout);
+    assertEquals(mapout, mapin);
+  }
+
+  private void testStringMap(ThriftTest.Client testClient) throws TException {
+    Map<String,String> mapout = new HashMap<String,String>();
+    mapout.put("a", "123");
+    mapout.put(" x y ", " with spaces ");
+    mapout.put("same", "same");
+    mapout.put("0", "numeric key");
+    Map<String,String> mapin = testClient.testStringMap(mapout);
     assertEquals(mapout, mapin);
   }
 
@@ -480,6 +489,21 @@ public abstract class ServerTestBase extends TestCase {
 
   private void testVoid(ThriftTest.Client testClient) throws TException {
     testClient.testVoid();
+  }
+
+  private void testException(ThriftTest.Client testClient) throws TException, Xception {
+    //@TODO testException
+    //testClient.testException("no Exception");
+    /*try {
+        testClient.testException("Xception");
+    } catch(Xception e) {
+    	assertEquals(e.message, "Xception");
+    }*/
+    /*try {
+        testClient.testException("ApplicationException");
+    } catch(TException e) {
+    	assertEquals(e.message, "ApplicationException");
+    }*/
   }
 
 }

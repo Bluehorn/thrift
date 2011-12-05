@@ -36,6 +36,7 @@ import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ByteArrayEntity;
 import org.apache.http.params.CoreConnectionPNames;
+import org.apache.http.util.EntityUtils;
 
 /**
  * HTTP implementation of the TTransport interface. Used for working with a
@@ -233,6 +234,13 @@ public class THttpClient extends TTransport {
       
       HttpResponse response = this.client.execute(this.host, post);
       int responseCode = response.getStatusLine().getStatusCode();
+
+      //      
+      // Retrieve the inputstream BEFORE checking the status code so
+      // resources get freed in the finally clause.
+      //
+
+      is = response.getEntity().getContent();
       
       if (responseCode != HttpStatus.SC_OK) {
         throw new TTransportException("HTTP Response code: " + responseCode);
@@ -240,12 +248,10 @@ public class THttpClient extends TTransport {
 
       // Read the responses into a byte array so we can release the connection
       // early. This implies that the whole content will have to be read in
-      // memory, and that momentarly we might use up twice the memory (while the
+      // memory, and that momentarily we might use up twice the memory (while the
       // thrift struct is being read up the chain).
       // Proceeding differently might lead to exhaustion of connections and thus
       // to app failure.
-      
-      is = response.getEntity().getContent();
       
       byte[] buf = new byte[1024];
       ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -260,7 +266,7 @@ public class THttpClient extends TTransport {
       
       try {
         // Indicate we're done with the content.
-        response.getEntity().consumeContent();
+        EntityUtils.consume(response.getEntity());
       } catch (IOException ioe) {
         // We ignore this exception, it might only mean the server has no
         // keep-alive capability.
