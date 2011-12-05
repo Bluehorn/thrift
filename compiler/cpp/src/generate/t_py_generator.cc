@@ -50,6 +50,9 @@ class t_py_generator : public t_generator {
     iter = parsed_options.find("new_style");
     gen_newstyle_ = (iter != parsed_options.end());
 
+    iter = parsed_options.find("defer");
+    gen_defer_ = (iter != parsed_options.end());
+
     iter = parsed_options.find("twisted");
     gen_twisted_ = (iter != parsed_options.end());
 
@@ -215,6 +218,11 @@ class t_py_generator : public t_generator {
    * True iff we should generate new-style classes.
    */
   bool gen_newstyle_;
+
+  /**
+   * True iff support for python-defer should be included.
+   */
+  bool gen_defer_;
 
   /**
    * True iff we should generate Twisted-friendly RPC services.
@@ -905,6 +913,12 @@ void t_py_generator::generate_service(t_service* tservice) {
     "from thrift.Thrift import TProcessor" << endl <<
     render_fastbinary_includes() << endl;
 
+  if (gen_defer_) {
+    f_service_ <<
+      "import defer" << endl <<
+      "import types" << endl;
+  }
+
   if (gen_twisted_) {
     f_service_ <<
       "from zope.interface import Interface, implements" << endl <<
@@ -1012,6 +1026,29 @@ void t_py_generator::generate_service_interface(t_service* tservice) {
     endl;
 }
 
+static const char py_defer_deferrable_decorator_source[] =
+  "class _deferrable(object):\n" \
+  "  __slots__ = ('original_function', 'async')\n" \
+  "  def __init__(self, function):\n" \
+  "    self.async = self.original_function = function\n" \
+  "  @property\n" \
+  "  def __name__(self):\n" \
+  "    return self.original_function.__name__\n"\
+  "  def __call__(self, client, *args, **kwargs):\n" \
+  "    d = self.original_function(client, *args, **kwargs)\n" \
+  "    while not d.called:\n" \
+  "      client._thrift_private_process_replies()\n" \
+  "    return d.result\n" \
+  "\n" \
+  "  def __get__(self, instance, owner):\n" \
+  "    if instance is None:\n" \
+  "      return self\n" \
+  "    else:\n" \
+  "      inner = _deferrable(self.original_function)\n" \
+  "      inner.async = types.MethodType(self.original_function, instance, owner)\n" \
+  "      return types.MethodType(inner, instance, owner)\n" \
+  "\n";
+
 /**
  * Generates a service client definition.
  *
@@ -1031,6 +1068,10 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     if (gen_twisted_ && gen_newstyle_) {
         extends_client = "(object)";
     }
+  }
+
+  if (gen_defer_) {
+    f_service_ << py_defer_deferrable_decorator_source;
   }
 
   if (gen_twisted_) {
@@ -1065,8 +1106,12 @@ void t_py_generator::generate_service_client(t_service* tservice) {
         indent() << "  self._iprot = self._oprot = iprot" << endl <<
         indent() << "  if oprot != None:" << endl <<
         indent() << "    self._oprot = oprot" << endl <<
-        indent() << "  self._seqid = 0" << endl <<
-        endl;
+        indent() << "  self._seqid = 0" << endl;
+      if (gen_defer_) {
+        indent(f_service_)
+                 << "  self._reqs = {}" << endl;
+      }
+      f_service_ << endl;
     }
   } else {
     if (gen_twisted_) {
@@ -1090,10 +1135,21 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     string funname = (*f_iter)->get_name();
 
     // Open function
+    if (gen_defer_) {
+      indent(f_service_) <<
+        "@_deferrable" << endl;
+    }
     indent(f_service_) <<
       "def " << function_signature(*f_iter) << ":" << endl;
     indent_up();
     generate_python_docstring(f_service_, (*f_iter));
+    if (gen_defer_) {
+      indent(f_service_) << "self._seqid += 1" << endl;
+      if (!(*f_iter)->is_oneway()) {
+        indent(f_service_) << "d = self._reqs[self._seqid] = defer.Deferred()" << endl;
+        indent(f_service_) << "d.add_callback(self.recv_" << funname << ")" << endl;
+      }
+    }
     if (gen_twisted_) {
       indent(f_service_) << "self._seqid += 1" << endl;
       if (!(*f_iter)->is_oneway()) {
@@ -1118,7 +1174,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
 
     if (!(*f_iter)->is_oneway()) {
       f_service_ << indent();
-      if (gen_twisted_) {
+      if (gen_twisted_ || gen_defer_) {
         f_service_ << "return d" << endl;
       } else {
         if (!(*f_iter)->get_returntype()->is_void()) {
@@ -1187,6 +1243,11 @@ void t_py_generator::generate_service_client(t_service* tservice) {
         f_service_ <<
           indent() << "def recv_" << (*f_iter)->get_name() <<
               "(self, iprot, mtype, rseqid):" << endl;
+      } else if (gen_defer_) {
+        f_service_ <<
+          indent() << "def recv_" << (*f_iter)->get_name() <<
+              "(self, result):" << endl;
+
       } else {
         t_struct noargs(program_);
         t_function recv_function((*f_iter)->get_returntype(),
@@ -1202,6 +1263,9 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       if (gen_twisted_) {
         f_service_ <<
           indent() << "d = self._reqs.pop(rseqid)" << endl;
+      } else if (gen_defer_) {
+        f_service_ <<
+          indent() << "(fname, mtype, rseqid) = result" << endl;
       } else {
         f_service_ <<
           indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl;
@@ -1281,6 +1345,18 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       indent_down();
       f_service_ << endl;
     }
+  }
+
+  if (gen_defer_) {
+    f_service_ <<
+      endl <<
+      indent() << "def _thrift_private_process_replies(self):" << endl;
+    indent_up();
+    f_service_ <<
+      indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
+      indent() << "d = self._reqs[rseqid]" << endl <<
+      indent() << "d.callback(result=(fname, mtype, rseqid))" << endl;
+    indent_down();
   }
 
   indent_down();
@@ -2384,6 +2460,7 @@ string t_py_generator::type_to_spec_args(t_type* ttype) {
 
 THRIFT_REGISTER_GENERATOR(py, "Python",
 "    new_style:       Generate new-style classes.\n" \
+"    defer:           Support async calls using python-defer module.\n" \
 "    twisted:         Generate Twisted-friendly RPC services.\n"
 )
 
