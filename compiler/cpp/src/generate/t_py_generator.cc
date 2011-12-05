@@ -1115,7 +1115,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       indent() << "def __init__(self, transport, oprot_factory):" << endl;
   } else {
     f_service_ <<
-      indent() << "def __init__(self, iprot, oprot=None):" << endl;
+      indent() << "def __init__(self, iprot, oprot=None, remote_executor=None):" << endl;
   }
   if (extends.empty()) {
     if (gen_twisted_) {
@@ -1130,7 +1130,13 @@ void t_py_generator::generate_service_client(t_service* tservice) {
         indent() << "  self._iprot = self._oprot = iprot" << endl <<
         indent() << "  if oprot != None:" << endl <<
         indent() << "    self._oprot = oprot" << endl <<
-        indent() << "  self._seqid = 0" << endl;
+        indent() << "  self._seqid = 0" << endl <<
+        indent() << "  if remote_executor is None:" << endl <<
+        indent() << "    self._remote_executor = lambda method, *args: method(*args)" << endl <<
+        indent() << "  else:" << endl <<
+        indent() << "    self._remote_executor = remote_executor" << endl <<
+        endl;
+
       if (gen_defer_) {
         indent(f_service_)
                  << "  self._reqs = {}" << endl;
@@ -1171,7 +1177,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       indent(f_service_) << "self._seqid += 1" << endl;
       if (!(*f_iter)->is_oneway()) {
         indent(f_service_) << "d = self._reqs[self._seqid] = defer.Deferred()" << endl;
-        indent(f_service_) << "d.add_callback(self.recv_" << funname << ")" << endl;
+        indent(f_service_) << "d.add_callback(lambda *args: self._remote_executor(self.recv_" << funname << ", *args))" << endl;
       }
     }
     if (gen_twisted_) {
