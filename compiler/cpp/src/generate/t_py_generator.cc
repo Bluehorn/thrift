@@ -1591,7 +1591,7 @@ void t_py_generator::generate_service_server(t_service* tservice) {
   indent_up();
 
   indent(f_service_) <<
-    "def __init__(self, handler):" << endl;
+    "def __init__(self, handler, handler_executor=None):" << endl;
   indent_up();
   if (extends.empty()) {
     if (gen_twisted_) {
@@ -1601,6 +1601,11 @@ void t_py_generator::generate_service_server(t_service* tservice) {
       f_service_ <<
         indent() << "self._handler = handler" << endl;
     }
+    f_service_ <<
+        indent() << "if handler_executor is None:" << endl <<
+        indent() << "  self._handler_executor = lambda method, *args: method(*args)" << endl <<
+        indent() << "else:" << endl <<
+        indent() << "  self._handler_executor = handler_executor" << endl;
 
     f_service_ <<
       indent() << "self._processMap = {}" << endl;
@@ -1621,6 +1626,7 @@ void t_py_generator::generate_service_server(t_service* tservice) {
   f_service_ << endl;
 
   // Generate the server implementation
+
   indent(f_service_) <<
     "def process(self, iprot, oprot):" << endl;
   indent_up();
@@ -1830,14 +1836,10 @@ void t_py_generator::generate_process_function(t_service* tservice,
       f_service_ << "result.success = ";
     }
     f_service_ <<
-      "self._handler." << tfunction->get_name() << "(";
-    bool first = true;
+      "self._handler_executor(" <<
+      "self._handler." << tfunction->get_name();
     for (f_iter = fields.begin(); f_iter != fields.end(); ++f_iter) {
-      if (first) {
-        first = false;
-      } else {
-        f_service_ << ", ";
-      }
+      f_service_ << ", ";
       f_service_ << "args." << (*f_iter)->get_name();
     }
     f_service_ << ")" << endl;
