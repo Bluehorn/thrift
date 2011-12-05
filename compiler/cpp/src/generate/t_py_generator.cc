@@ -1040,7 +1040,7 @@ static const char py_defer_deferrable_decorator_source[] =
   "    while not d.called:\n" \
   "      client.thrift_receive_reply()\n" \
   "    result = d.result\n" \
-  "    if isinstance(result, defer.DeferredException):\n" \
+  "    if type(result) == _ExceptionContainer:\n" \
   "      result.raise_exception()\n" \
   "    return result\n" \
   "\n" \
@@ -1052,6 +1052,25 @@ static const char py_defer_deferrable_decorator_source[] =
   "      inner.async = types.MethodType(self.original_function, instance, owner)\n" \
   "      return types.MethodType(inner, instance, owner)\n" \
   "\n";
+
+
+static const char py_defer_exception_container_source[] =
+  "class _ExceptionContainer(object):\n"
+  "    \"\"\"\n"
+  "    Wrap a DeferredException (which wraps an exception). This is needed so that we pretend that\n"
+  "    the exception is the result we actually wanted without handling it in an errback. Without\n"
+  "    this wrapper, having a DeferredException as the final result of the deferrable chain will\n"
+  "    invoke the sys.excepthook which writes the \"uncaught exception\" to the log, even if we\n"
+  "    actually reraise the exception in the _deferrable.__call__ method.\n"
+  "    \"\"\"\n"
+  "\n"
+  "    def __init__(self, deferred_exception):\n"
+  "        self.deferred_exception = deferred_exception\n"
+  "\n"
+  "    def raise_exception(self):\n"
+  "        self.deferred_exception.raise_exception()\n"
+  "\n";
+
 
 /**
  * Generates a service client definition.
@@ -1075,7 +1094,8 @@ void t_py_generator::generate_service_client(t_service* tservice) {
   }
 
   if (gen_defer_) {
-    f_service_ << py_defer_deferrable_decorator_source;
+    f_service_ << py_defer_deferrable_decorator_source
+               << py_defer_exception_container_source;
   }
 
   if (gen_twisted_) {
@@ -1361,6 +1381,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       indent() << "  return False" << endl <<
       indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
       indent() << "d = self._reqs.pop(rseqid)" << endl <<
+      indent() << "d.add_errback(_ExceptionContainer)" << endl <<
       indent() << "d.callback(result=(fname, mtype, rseqid))" << endl <<
       indent() << "return True" << endl;
     indent_down();
