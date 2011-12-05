@@ -1037,7 +1037,7 @@ static const char py_defer_deferrable_decorator_source[] =
   "  def __call__(self, client, *args, **kwargs):\n" \
   "    d = self.original_function(client, *args, **kwargs)\n" \
   "    while not d.called:\n" \
-  "      client._thrift_private_process_replies()\n" \
+  "      client.thrift_receive_reply()\n" \
   "    return d.result\n" \
   "\n" \
   "  def __get__(self, instance, owner):\n" \
@@ -1350,7 +1350,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
   if (gen_defer_) {
     f_service_ <<
       endl <<
-      indent() << "def _thrift_private_process_replies(self):" << endl;
+      indent() << "def thrift_receive_reply(self):" << endl;
     indent_up();
     f_service_ <<
       indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
