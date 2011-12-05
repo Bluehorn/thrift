@@ -911,7 +911,8 @@ void t_py_generator::generate_service(t_service* tservice) {
   f_service_ <<
     "from ttypes import *" << endl <<
     "from thrift.Thrift import TProcessor" << endl <<
-    render_fastbinary_includes() << endl;
+    render_fastbinary_includes() << endl <<
+    "import traceback" << endl;
 
   if (gen_defer_) {
     f_service_ <<
@@ -1038,7 +1039,10 @@ static const char py_defer_deferrable_decorator_source[] =
   "    d = self.original_function(client, *args, **kwargs)\n" \
   "    while not d.called:\n" \
   "      client.thrift_receive_reply()\n" \
-  "    return d.result\n" \
+  "    result = d.result\n" \
+  "    if isinstance(result, defer.DeferredException):\n" \
+  "      result.raise_exception()\n" \
+  "    return result\n" \
   "\n" \
   "  def __get__(self, instance, owner):\n" \
   "    if instance is None:\n" \
@@ -1632,7 +1636,15 @@ void t_py_generator::generate_service_server(t_service* tservice) {
       indent() << "  return self._processMap[name](self, seqid, iprot, oprot)" << endl;
   } else {
     f_service_ <<
-      indent() << "  self._processMap[name](self, seqid, iprot, oprot)" << endl;
+      indent() << "  try:" << endl <<
+      indent() << "    self._processMap[name](self, seqid, iprot, oprot)" << endl <<
+      indent() << "  except Exception, e:" << endl <<
+      indent() << "    t = TApplicationException(TApplicationException.MISSING_RESULT," << endl <<
+      indent() << "          ''.join(traceback.format_exception(*sys.exc_info())))" << endl <<
+      indent() << "    oprot.writeMessageBegin(name, TMessageType.EXCEPTION, seqid)" << endl <<
+      indent() << "    t.write(oprot)" << endl <<
+      indent() << "    oprot.writeMessageEnd()" << endl <<
+      indent() << "    oprot.trans.flush()" << endl;
 
     // Read end of args field, the T_STOP, and the struct close
     f_service_ <<
