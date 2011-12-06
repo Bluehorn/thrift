@@ -415,7 +415,8 @@ string t_py_generator::py_autogen_comment() {
  */
 string t_py_generator::py_imports() {
   return
-    string("from thrift.Thrift import TType, TMessageType, TException, TApplicationException");
+    string("import sys\n"
+           "from thrift.Thrift import TType, TMessageType, TException, TApplicationException");
 }
 
 /**
