@@ -1287,8 +1287,8 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     if (gen_defer_) {
       indent(f_service_) << "self._seqid += 1" << endl;
       if (!(*f_iter)->is_oneway()) {
-        indent(f_service_) << "d = self._reqs[self._seqid] = defer.Deferred()" << endl;
-        indent(f_service_) << "d.add_callback(lambda *args: self._remote_executor(self.recv_" << funname << ", *args))" << endl;
+        indent(f_service_) << "d = defer.Deferred()" << endl;
+        indent(f_service_) << "self._reqs[self._seqid] = (self.recv_" << funname << ", d)" << endl;
       }
     }
     if (gen_twisted_) {
@@ -1497,9 +1497,13 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       indent() << "if not wait_always and not self._reqs:" << endl <<
       indent() << "  return False" << endl <<
       indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
-      indent() << "d = self._reqs.pop(rseqid)" << endl <<
-      indent() << "d.add_errback(_ExceptionContainer)" << endl <<
-      indent() << "d.callback(result=(fname, mtype, rseqid))" << endl <<
+      indent() << "recv_func, d = self._reqs.pop(rseqid)" << endl <<
+      indent() << "try:" << endl <<
+      indent() << "    result = self._remote_executor(recv_func, (fname, mtype, rseqid))" << endl <<
+      indent() << "    d.callback(result=result)" << endl <<
+      indent() << "except Exception, e:" << endl <<
+      indent() << "    d.add_errback(_ExceptionContainer)" << endl <<
+      indent() << "    d.errback(error=e)" << endl <<
       indent() << "return True" << endl;
     indent_down();
 
