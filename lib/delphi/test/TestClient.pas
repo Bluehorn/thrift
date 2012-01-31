@@ -65,7 +65,7 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(ATransport: ITransport; AProtocol : IProtocol; ANumIteration: Integer);
+    constructor Create( const ATransport: ITransport; const AProtocol : IProtocol; ANumIteration: Integer);
     destructor Destroy; override;
   end;
 
@@ -88,6 +88,8 @@ begin
   else result := 'false';
 end;
 
+// not available in all versions, so make sure we have this one imported
+function IsDebuggerPresent: BOOL; stdcall; external KERNEL32 name 'IsDebuggerPresent';
 
 { TTestClient }
 
@@ -878,7 +880,7 @@ begin
 end;
 
 
-constructor TClientThread.Create(ATransport: ITransport; AProtocol : IProtocol; ANumIteration: Integer);
+constructor TClientThread.Create( const ATransport: ITransport; const AProtocol : IProtocol; ANumIteration: Integer);
 begin
   inherited Create( True );
   FNumIteration := ANumIteration;

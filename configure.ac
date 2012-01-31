@@ -216,6 +216,9 @@ if test "$with_php_extension" = "yes"; then
 fi
 AM_CONDITIONAL(WITH_PHP_EXTENSION, [test "$have_php_extension" = "yes"])
 
+AC_PATH_PROG([PHPUNIT], [phpunit])
+AM_CONDITIONAL(HAVE_PHPUNIT, [test "x$PHPUNIT" != "x"])
+
 AX_THRIFT_LIB(ruby, [Ruby], yes)
 have_ruby=no
 if test "$with_ruby" = "yes"; then
@@ -283,6 +286,18 @@ if test "$with_tests" = "no"; then
 fi
 AM_CONDITIONAL(WITH_TESTS, [test "$have_tests" = "yes"])
 
+AM_CONDITIONAL(MINGW, false)
+case "${host_os}" in
+*mingw*)
+  mingw32_support="yes"
+  AC_CHECK_HEADER(windows.h)
+  AM_CONDITIONAL(MINGW, true)
+  ;;
+*)
+  AC_ISC_POSIX
+  ;;
+esac
+
 AC_C_CONST
 AC_C_INLINE
 AC_C_VOLATILE
@@ -313,6 +328,7 @@ AC_CHECK_HEADERS([malloc.h])
 AC_CHECK_HEADERS([openssl/ssl.h])
 AC_CHECK_HEADERS([openssl/rand.h])
 AC_CHECK_HEADERS([openssl/x509v3.h])
+AC_CHECK_HEADERS([sched.h])
 
 AC_CHECK_LIB(pthread, pthread_create)
 dnl NOTE(dreiss): I haven't been able to find any really solid docs
@@ -474,11 +490,15 @@ AC_CONFIG_FILES([
   lib/perl/Makefile
   lib/perl/test/Makefile
   lib/php/Makefile
+  lib/php/test/Makefile
   lib/py/Makefile
   lib/rb/Makefile
   test/Makefile
   test/cpp/Makefile
   test/hs/Makefile
+  test/nodejs/Makefile
+  test/php/Makefile
+  test/perl/Makefile
   test/py/Makefile
   test/py.twisted/Makefile
   test/rb/Makefile

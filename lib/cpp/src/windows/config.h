@@ -72,12 +72,25 @@ typedef ptrdiff_t ssize_t;
 
 // Missing functions.
 #define usleep(ms) Sleep(ms)
+inline int sleep(DWORD ms)
+{
+    Sleep(ms);
+    return 0;
+}
 
 #if WINVER <= 0x0502
 #define poll(fds, nfds, timeout) \
     poll_win32(fds, nfds, timeout)
 
-inline int poll_win32(LPWSAPOLLFD fdArray, ULONG fds, INT timeout)
+typedef struct pollfd {
+
+    SOCKET  fd;
+    SHORT   events;
+    SHORT   revents;
+
+} WSAPOLLFD, *PWSAPOLLFD, FAR *LPWSAPOLLFD;
+
+inline int poll_win32(LPWSAPOLLFD fdArray, ULONG /*fds*/, INT timeout)
 {
     fd_set read_fds;
     fd_set write_fds;
@@ -91,7 +104,7 @@ inline int poll_win32(LPWSAPOLLFD fdArray, ULONG fds, INT timeout)
     FD_SET(fdArray[0].fd, &write_fds);
     FD_SET(fdArray[0].fd, &except_fds);
 
-    timeval time_out = {timeout * 0.001, timeout * 1000};
+    timeval time_out = {timeout / 1000, timeout * 1000};
     return select(1, &read_fds, &write_fds, &except_fds, &time_out);
 }
 #else
@@ -100,9 +113,9 @@ inline int poll_win32(LPWSAPOLLFD fdArray, ULONG fds, INT timeout)
 	}
 #endif // WINVER
 
-inline void close(SOCKET socket)
+inline int close(SOCKET socket)
 {
-    ::closesocket(socket);
+    return ::closesocket(socket);
 }
 
 #endif // _THRIFT_WINDOWS_CONFIG_H_

@@ -91,7 +91,7 @@ class t_delphi_generator : public t_oop_generator
     void print_const_prop(std::ostream& out, string name, t_type* type, t_const_value* value);
     void print_private_field(std::ostream& out, string name, t_type* type, t_const_value* value);
     void print_const_value ( std::ostream& vars, std::ostream& out, std::string name, t_type* type, t_const_value* value);
-    void initialize_field(std::ostream& vars, std::ostream& out, std::string name, t_type* type, t_const_value* value, std::string cls_nm = "");
+    void initialize_field(std::ostream& vars, std::ostream& out, std::string name, t_type* type, t_const_value* value);
     void finalize_field(std::ostream& out, std::string name, t_type* type, t_const_value* value, std::string cls_nm = "");
     std::string render_const_value( std::ostream& local_vars, std::ostream& out, std::string name, t_type* type, t_const_value* value);
     void print_const_def_value( std::ostream& vars, std::ostream& out, std::string name, t_type* type, t_const_value* value, std::string cls_nm = "");
@@ -131,14 +131,17 @@ class t_delphi_generator : public t_oop_generator
 
     std::string type_name( t_type* ttype, bool b_cls=false, bool b_no_postfix=false, bool b_exception_factory=false, bool b_full_exception_factory = false);
     std::string normalize_clsnm(std::string name, std::string prefix, bool b_no_check_keyword = false);
-
+    std::string input_arg_prefix( t_type* ttype);
+  
     std::string base_type_name(t_base_type* tbase);
     std::string declare_field(t_field* tfield, bool init=false, std::string prefix="", bool is_xception_class = false);
-    std::string function_signature(t_function* tfunction, std::string full_cls="", bool is_xception = false);
+    std::string function_signature(t_function* tfunction, std::string full_cls="", bool is_xception = false);  
     std::string argument_list(t_struct* tstruct);
+    std::string constructor_argument_list(t_struct* tstruct, std::string current_indent);
     std::string type_to_enum(t_type* ttype);
     std::string prop_name(t_field* tfield, bool is_xception = false);
     std::string prop_name(std::string name, bool is_xception = false);
+    std::string constructor_param_name(string name);
 
     void write_enum(std::string line);
     void write_forward_decr(std::string line);
@@ -609,8 +612,8 @@ void t_delphi_generator::generate_consts(std::vector<t_const*> consts) {
 
   indent_up_impl();
   for (c_iter = consts.begin(); c_iter != consts.end(); ++c_iter) {
-    initialize_field( vars, code, "F" + prop_name( (*c_iter)->get_name()),
-      (*c_iter)->get_type(), (*c_iter)->get_value(), "TConstants" );
+    initialize_field( vars, code, "TConstants.F" + prop_name( (*c_iter)->get_name()),
+      (*c_iter)->get_type(), (*c_iter)->get_value());
   }
   indent_down_impl();
 
@@ -664,7 +667,7 @@ void t_delphi_generator::print_const_def_value(std::ostream& vars, std::ostream&
         throw "type error: " + type->get_name() + " has no field " + v_iter->first->get_string();
       }
       string val = render_const_value( vars, out, name, field_type, v_iter->second);
-      indent_impl(out) << cls_prefix << normalize_name(name) << "." << normalize_name( v_iter->first->get_string()) << " := " << val << ";" << endl;
+      indent_impl(out) << cls_prefix << normalize_name(name) << "." << prop_name( v_iter->first->get_string(), type->is_xception()) << " := " << val << ";" << endl;
     }
   } else if (type->is_map()) {
     t_type* ktype = ((t_map*)type)->get_key_type();
@@ -716,15 +719,13 @@ void t_delphi_generator::print_const_value( std::ostream& vars, std::ostream& ou
     indent_impl(out) << name << " := " << type_name(type) << "(" << value->get_integer() << ");" << endl;
   } else {
     string typname;
-    typname = type_name(type,!type->is_xception());
+    typname = type_name( type, true, false, type->is_xception(), type->is_xception());
     indent_impl(out) << name << " := " << typname << ".Create;" << endl;
     print_const_def_value( vars, out, name, type, value);
   }
-
 }
 
-void t_delphi_generator::initialize_field(std::ostream& vars, std::ostream& out, string name, t_type* type, t_const_value* value, string cls_nm) {
-  (void) cls_nm;
+void t_delphi_generator::initialize_field(std::ostream& vars, std::ostream& out, string name, t_type* type, t_const_value* value) {
   print_const_value( vars, out, name, type, value );
 }
 
@@ -844,10 +845,10 @@ void t_delphi_generator::generate_delphi_struct_impl( ostream& out, string cls_p
   }
   indent_down_impl();
 
-
   indent_impl(out) << "constructor " << cls_prefix << cls_nm <<  "." << "Create;" << endl;
 
   if ( ! vars.str().empty()) {
+    out << "var" << endl;
     out << vars.str();
   }
 
@@ -866,6 +867,21 @@ void t_delphi_generator::generate_delphi_struct_impl( ostream& out, string cls_p
 
   indent_down_impl();
   indent_impl(out) << "end;" << endl << endl;
+
+  if ((members.size() > 0) && is_exception && (!is_x_factory)) {
+    indent_impl(out) << "constructor " << cls_prefix << cls_nm <<  "." << "Create(" << constructor_argument_list( tstruct, indent_impl()) << ");" << endl;
+    indent_impl(out) << "begin" << endl;
+    indent_up_impl();
+    indent_impl(out) << "Create;" << endl;
+    for (m_iter = members.begin(); m_iter != members.end(); ++m_iter) {
+      string propname = prop_name((*m_iter)->get_name(), is_exception);
+      string param_name = constructor_param_name( (*m_iter)->get_name());
+      indent_impl(out) << propname << " := " << param_name << ";" << endl;
+    }
+    indent_impl(out) << "UpdateMessageProperty;" << endl;
+    indent_down_impl();
+    indent_impl(out) << "end;" << endl << endl;
+  }
 
   indent_impl(out) << "destructor "  << cls_prefix << cls_nm <<  "." << "Destroy;" << endl;
   indent_impl(out) << "begin" << endl;
@@ -1036,7 +1052,13 @@ void t_delphi_generator::generate_delphi_struct_definition(ostream &out, t_struc
   indent(out) << "public" << endl;
   indent_up();
 
-  indent(out) << "constructor Create;" << endl;
+  if ((members.size() > 0) && is_exception && (! is_x_factory)) {
+    indent(out) << "constructor Create; overload;" << endl;
+    indent(out) << "constructor Create(" << constructor_argument_list( tstruct, indent()) << "); overload;" << endl;
+  } else {
+    indent(out) << "constructor Create;" << endl;
+  }
+
   indent(out) << "destructor Destroy; override;" << endl;
 
   out  << endl;
@@ -1051,8 +1073,8 @@ void t_delphi_generator::generate_delphi_struct_definition(ostream &out, t_struc
   if ((! is_exception) || is_x_factory) {
     out  << endl;
     indent(out) << "// IBase" << endl;
-    indent(out) << "procedure Read( iprot: IProtocol);" << endl;
-    indent(out) << "procedure Write( oprot: IProtocol);" << endl;
+    indent(out) << "procedure Read( const iprot: IProtocol);" << endl;
+    indent(out) << "procedure Write( const oprot: IProtocol);" << endl;
   }
 
   if (is_exception && is_x_factory) {
@@ -1079,9 +1101,7 @@ void t_delphi_generator::generate_delphi_struct_definition(ostream &out, t_struc
   }
 
   indent_down();
-  indent(out) << "end;" << endl;
-
-  indent(out) << endl;
+  indent(out) << "end;" << endl << endl;
 }
 
 void t_delphi_generator::generate_service(t_service* tservice) {
@@ -1174,9 +1194,11 @@ void t_delphi_generator::generate_service_client(t_service* tservice) {
   indent_down_impl();
   indent_impl(s_service_impl) <<  "end;" << endl << endl;
 
-  indent(s_service) << "constructor Create( iprot: IProtocol; oprot: IProtocol); overload;" << endl;
+  indent(s_service) << "constructor Create( const iprot: IProtocol; const oprot: IProtocol); overload;" << endl;
 
-  indent_impl(s_service_impl) <<  "constructor " << normalize_clsnm( service_name_, "T") << ".TClient.Create( iprot: IProtocol; oprot: IProtocol);" << endl;
+  indent_impl(s_service_impl) <<  
+    "constructor " << normalize_clsnm( service_name_, "T") << 
+    ".TClient.Create( const iprot: IProtocol; const oprot: IProtocol);" << endl;
   indent_impl(s_service_impl) <<  "begin" << endl;
   indent_up_impl();
   indent_impl(s_service_impl) << "iprot_ := iprot;" << endl;    
@@ -1427,7 +1449,7 @@ void t_delphi_generator::generate_service_server(t_service* tservice) {
   indent_up();
   indent(s_service) << "type" << endl;
   indent_up();
-  indent(s_service) << "TProcessFunction = reference to procedure( seqid: Integer; iprot: IProtocol; oprot: IProtocol);" << endl;
+  indent(s_service) << "TProcessFunction = reference to procedure( seqid: Integer; const iprot: IProtocol; const oprot: IProtocol);" << endl;
   indent_down();
   indent_down();
 
@@ -1442,12 +1464,12 @@ void t_delphi_generator::generate_service_server(t_service* tservice) {
   indent(s_service) << "public" << endl;
   indent_up();
   if (extends.empty()) {
-    indent(s_service) << "function Process( iprot: IProtocol; oprot: IProtocol): Boolean;" << endl;
+    indent(s_service) << "function Process( const iprot: IProtocol; const oprot: IProtocol): Boolean;" << endl;
   } else {
-    indent(s_service) << "function Process( iprot: IProtocol; oprot: IProtocol): Boolean; reintroduce;" << endl;
+    indent(s_service) << "function Process( const iprot: IProtocol; const oprot: IProtocol): Boolean; reintroduce;" << endl;
   }
 
-  indent_impl(s_service_impl) << "function " << full_cls << ".Process( iprot: IProtocol; oprot: IProtocol): Boolean;" << endl;;
+  indent_impl(s_service_impl) << "function " << full_cls << ".Process( const iprot: IProtocol; const oprot: IProtocol): Boolean;" << endl;;
   indent_impl(s_service_impl) << "var" << endl;
   indent_up_impl();
   indent_impl(s_service_impl) << "msg : IMessage;" << endl;
@@ -1533,7 +1555,7 @@ void t_delphi_generator::generate_process_function(t_service* tservice, t_functi
   string result_intfnm = normalize_clsnm(org_resultname, "I");
 
   indent(s_service) <<
-    "procedure " << funcname << "_Process( seqid: Integer; iprot: IProtocol; oprot: IProtocol);" << endl;
+    "procedure " << funcname << "_Process( seqid: Integer; const iprot: IProtocol; const oprot: IProtocol);" << endl;
 
   if (tfunction->is_oneway()) {
     indent_impl(s_service_impl) << "// one way processor" << endl;
@@ -1542,7 +1564,7 @@ void t_delphi_generator::generate_process_function(t_service* tservice, t_functi
   }
 
   indent_impl(s_service_impl) <<
-    "procedure " << full_cls << "." << funcname << "_Process( seqid: Integer; iprot: IProtocol; oprot: IProtocol);" << endl;
+    "procedure " << full_cls << "." << funcname << "_Process( seqid: Integer; const iprot: IProtocol; const oprot: IProtocol);" << endl;
   indent_impl(s_service_impl) << "var" << endl;
   indent_up_impl();
   indent_impl(s_service_impl) << "args: " << args_intfnm << ";" << endl;
@@ -1999,6 +2021,13 @@ std::string t_delphi_generator::prop_name(string name, bool is_xception) {
   return normalize_name( ret, true, is_xception);
 }
 
+std::string t_delphi_generator::constructor_param_name(string name) {
+  string ret = name;
+  ret[0] = toupper(ret[0]);
+  ret = "A" + ret;
+  return normalize_name( ret, false, false);
+}
+
 string t_delphi_generator::normalize_clsnm(string clsnm, string prefix, bool b_no_check_keyword) {
   if (clsnm.size() > 0) {
     clsnm[0] = toupper(clsnm[0]);
@@ -2078,6 +2107,52 @@ string t_delphi_generator::type_name( t_type* ttype, bool b_cls, bool b_no_postf
   return nm;
 }
 
+// returns "const " for some argument types
+string t_delphi_generator::input_arg_prefix( t_type* ttype) {
+
+  // base types
+  if (ttype->is_base_type()) {
+    switch (((t_base_type*)ttype)->get_base()) {
+  
+      // these should be const'ed for optimal performamce
+      case t_base_type::TYPE_STRING:  // refcounted pointer
+      case t_base_type::TYPE_I64:   // larger than 32 bit
+      case t_base_type::TYPE_DOUBLE:   // larger than 32 bit
+        return "const ";
+  
+      // all others don't need to be
+      case t_base_type::TYPE_BYTE:
+      case t_base_type::TYPE_I16:
+      case t_base_type::TYPE_I32:
+      case t_base_type::TYPE_BOOL:
+      case t_base_type::TYPE_VOID:
+        return "";
+      
+      // we better always report any unknown types
+      default:
+        throw "compiler error: no input_arg_prefix() for base type " + (((t_base_type*)ttype)->get_base());
+    }
+  
+  // enums
+  } else if (ttype->is_enum()) {
+    return "";   // usually <= 32 bit
+  
+  // containers
+  } else if (ttype->is_map()) {
+    return "const ";  // refcounted pointer
+
+  } else if (ttype->is_set()) {
+    return "const ";  // refcounted pointer
+
+  } else if (ttype->is_list()) {
+    return "const ";  // refcounted pointer
+
+  }
+  
+  // any other type, either TSomething or ISomething
+  return "const ";  // possibly refcounted pointer
+}
+
 string t_delphi_generator::base_type_name(t_base_type* tbase) {
   switch (tbase->get_base()) {
     case t_base_type::TYPE_VOID:
@@ -2150,9 +2225,59 @@ string t_delphi_generator::argument_list(t_struct* tstruct) {
     }
 
     tt = (*f_iter)->get_type();
-    result += normalize_name((*f_iter)->get_name()) + ": " + type_name( tt, false, true, tt->is_xception(), true);
+  result += input_arg_prefix(tt);  // const?
+  result += normalize_name((*f_iter)->get_name()) + ": " + type_name( tt, false, true, tt->is_xception(), true);
   }
   return result;
+}
+
+string t_delphi_generator::constructor_argument_list(t_struct* tstruct, string current_indent) {
+  ostringstream result;
+  const vector<t_field*>& fields = tstruct->get_members();
+  vector<t_field*>::const_iterator f_iter;
+  bool first = true;
+  t_type* tt;
+  string line = "";
+  string newline_indent = current_indent + "  ";
+
+  bool firstline = true;
+
+  for (f_iter = fields.begin(); f_iter != fields.end(); ++f_iter) {
+    if (first) {
+      first = false;
+    } else {
+      line += ";";
+    }
+
+    if (line.size() > 80) {
+      if ( firstline ) {
+        result << endl << newline_indent;
+        firstline = false;
+      }
+      result << line << endl;
+      line = newline_indent;
+    } else if ( line.size() > 0) {
+      line += " ";
+    }
+
+    tt = (*f_iter)->get_type();
+    line += input_arg_prefix(tt);  // const?
+    line += constructor_param_name((*f_iter)->get_name()) + ": " + type_name( tt, false, true, tt->is_xception(), true);
+  }
+
+  if ( line.size() > 0) {
+    result << line;
+  }
+
+  string result_str;
+
+  if (firstline) {
+    result_str = " " + result.str();
+  } else {
+    result_str = result.str();
+  }
+
+  return result_str;
 }
 
 string t_delphi_generator::type_to_enum(t_type* type) {
@@ -2440,7 +2565,7 @@ void t_delphi_generator::generate_delphi_struct_reader_impl(ostream& out, string
 
   cls_nm = type_name(tstruct,true,false,is_exception,is_exception);
 
-  indent_impl(out) << "procedure " << cls_prefix << cls_nm << ".Read( iprot: IProtocol);" << endl;
+  indent_impl(out) << "procedure " << cls_prefix << cls_nm << ".Read( const iprot: IProtocol);" << endl;
   indent_impl(out) << "var" << endl;
   indent_up_impl();
   indent_impl(out) << "field_ : IField;" << endl;
@@ -2508,7 +2633,7 @@ void t_delphi_generator::generate_delphi_struct_result_writer_impl(ostream& out,
 
   cls_nm = type_name(tstruct,true,false,is_exception,is_exception);
 
-  indent_impl(out) << "procedure " << cls_prefix << cls_nm << ".Write( oprot: IProtocol);" << endl;
+  indent_impl(out) << "procedure " << cls_prefix << cls_nm << ".Write( const oprot: IProtocol);" << endl;
   indent_impl(out) << "var" << endl;
   indent_up_impl();
   indent_impl(out) << "struc : IStruct;" << endl;
@@ -2580,7 +2705,7 @@ void t_delphi_generator::generate_delphi_struct_writer_impl(ostream& out, string
 
   cls_nm = type_name(tstruct,true,false,is_exception,is_exception);
 
-  indent_impl(out) << "procedure " << cls_prefix << cls_nm << ".Write( oprot: IProtocol);" << endl;
+  indent_impl(out) << "procedure " << cls_prefix << cls_nm << ".Write( const oprot: IProtocol);" << endl;
   indent_impl(out) << "var" << endl;
   indent_up_impl();
   indent_impl(out) << "struc : IStruct;" << endl;

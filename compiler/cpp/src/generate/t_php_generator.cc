@@ -415,7 +415,7 @@ void t_php_generator::generate_enum(t_enum* tenum) {
   // code but you can't do things like an 'extract' on it, which is a bit of
   // a downer.
   f_types_ <<
-    "final class " << tenum->get_name() << " {" << endl;
+    "final class " << php_namespace(tenum->get_program()) << tenum->get_name() << " {" << endl;
   indent_up();
 
   for (c_iter = constants.begin(); c_iter != constants.end(); ++c_iter) {
@@ -1243,6 +1243,7 @@ void t_php_generator::generate_process_function(t_service* tservice,
     f_service_ <<
       indent() << "$output->writeMessageBegin('" << tfunction->get_name() << "', " << NS_ROOT << "TMessageType::REPLY, $seqid);" << endl <<
       indent() << "$result->write($output);" << endl <<
+      indent() << "$output->writeMessageEnd();" << endl <<
       indent() << "$output->getTransport()->flush();" << endl;
   }
 
