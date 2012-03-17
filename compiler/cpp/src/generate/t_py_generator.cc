@@ -93,7 +93,7 @@ class t_py_generator : public t_generator {
     gen_utf8strings_ = (iter != parsed_options.end());
 
     copy_options_ = option_string;
-    
+
     if (gen_twisted_){
       out_dir_base_ = "gen-py.twisted";
     } else {
@@ -258,17 +258,17 @@ class t_py_generator : public t_generator {
    * True if we should generate dynamic style classes.
    */
   bool gen_dynamic_;
- 
+
   bool gen_dynbase_;
   std::string gen_dynbaseclass_;
   std::string gen_dynbaseclass_exc_;
- 
+
   std::string import_dynbase_;
 
   bool gen_slots_;
 
   std::string copy_options_;
- 
+
   /**
    * True iff support for python-defer should be included.
    */
@@ -449,7 +449,7 @@ void t_py_generator::generate_enum(t_enum* tenum) {
   f_types_ <<
     "class " << tenum->get_name() <<
     (gen_newstyle_ ? "(object)" : "") <<
-    (gen_dynamic_ ? "(" + gen_dynbaseclass_ + ")" : "") <<  
+    (gen_dynamic_ ? "(" + gen_dynbaseclass_ + ")" : "") <<
     ":" << endl;
   indent_up();
   generate_python_docstring(f_types_, tenum);
@@ -807,7 +807,7 @@ void t_py_generator::generate_py_struct_definition(ofstream& out,
       indent() << "    for key in self.__slots__]" << endl <<
       indent() << "  return '%s(%s)' % (self.__class__.__name__, ', '.join(L))" << endl <<
       endl;
-    
+
     // Equality method that compares each attribute by value and type, walking __slots__
     out <<
       indent() << "def __eq__(self, other):" << endl <<
@@ -820,7 +820,7 @@ void t_py_generator::generate_py_struct_definition(ofstream& out,
       indent() << "      return False" << endl <<
       indent() << "  return True" << endl <<
       endl;
-    
+
     out <<
       indent() << "def __ne__(self, other):" << endl <<
       indent() << "  return not (self == other)" << endl <<
@@ -1494,17 +1494,45 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       indent() << "def thrift_receive_reply(self, wait_always=False):" << endl;
     indent_up();
     f_service_ <<
-      indent() << "if not wait_always and not self._reqs:" << endl <<
+      indent() << "\"\"\"" << endl <<
+      indent() << "Receive and handles the next reply from the other end. This is intended" << endl <<
+      indent() << "to be used on the same thread that sent the requests. Therefore it is" << endl <<
+      indent() << "safe here to pass the replies to asynchronous requests to the deferred" << endl <<
+      indent() << "objects registered to them." << endl <<
+      indent() << "\"\"\"" << endl;
+    f_service_ <<
+      indent() << "if not (wait_always or self._reqs):" << endl <<
       indent() << "  return False" << endl <<
-      indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
-      indent() << "recv_func, d = self._reqs.pop(rseqid)" << endl <<
+      indent() << "result_wrapper, d = self.thrift_get_reply_pair()" << endl <<
       indent() << "try:" << endl <<
-      indent() << "    result = self._remote_executor(recv_func, (fname, mtype, rseqid))" << endl <<
-      indent() << "    d.callback(result=result)" << endl <<
+      indent() << "    d.callback(result=result_wrapper())" << endl <<
       indent() << "except Exception, e:" << endl <<
       indent() << "    d.add_errback(_ExceptionContainer)" << endl <<
       indent() << "    d.errback(error=e)" << endl <<
       indent() << "return True" << endl;
+    indent_down();
+
+    f_service_ << endl <<
+      indent() << "def thrift_get_reply_pair(self):" << endl;
+    indent_up();
+    f_service_ <<
+      indent() << "\"\"\"" << endl <<
+      indent() << "Retrieve the next reply packet from the incoming protocol and return a" << endl <<
+      indent() << "pair (result_wrapper, deferred). The result_wrapper returns the result" << endl <<
+      indent() << "of the remote operation when called. If the remote operation raised an" << endl <<
+      indent() << "exception, calling the result_wrapper will reraise it." << endl <<
+      indent() << "deferred refers to the Deferred instance that was attached to the call." << endl <<
+      indent() << "The caller is responsible to deliver the result to this deferred object." << endl <<
+      indent() << "\"\"\"" << endl;
+    f_service_ << endl <<
+      indent() << "(fname, mtype, rseqid) = self._iprot.readMessageBegin()" << endl <<
+      indent() << "recv_func, deferred = self._reqs.pop(rseqid)" << endl <<
+      indent() << "try:" << endl <<
+      indent() << "    result = self._remote_executor(recv_func, (fname, mtype, rseqid))" << endl <<
+      indent() << "    result_wrapper = lambda: result" << endl <<
+      indent() << "except Exception, err:" << endl <<
+      indent() << "    result_wrapper = ExceptionWrapper(err)" << endl <<
+      indent() << "return result_wrapper, deferred" << endl;
     indent_down();
 
     f_service_ << endl <<
@@ -1513,6 +1541,21 @@ void t_py_generator::generate_service_client(t_service* tservice) {
   }
 
   indent_down();
+
+  if (gen_defer_) {
+    f_service_ << endl <<
+      indent() << "class ExceptionWrapper(object):" << endl <<
+      indent() << "    \"\"\"" << endl <<
+      indent() << "    Wraps an exception so that calling this object will reraise the original" << endl <<
+      indent() << "    exception. Used to pass exceptions between threads." << endl <<
+      indent() << "    \"\"\"" << endl <<
+      indent() << "    __slots__ = '_exception'," << endl <<
+      indent() << "    def __init__(self, exception):" << endl <<
+      indent() << "        self._exception = exception" << endl <<
+      indent() << "    def __call__(self):" << endl <<
+      indent() << "        raise self._exception" << endl;
+  }
+
   f_service_ <<
     endl;
 }
